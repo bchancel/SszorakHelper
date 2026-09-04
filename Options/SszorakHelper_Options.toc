@@ -1,0 +1,9 @@
+## Interface: 120100
+## Title: Sszorak Helper Options
+## Notes: Load-on-demand configuration for Sszorak Helper.
+## Author: Sszorak Helper
+## Version: 0.1.0-8
+## Dependencies: SszorakHelper
+## LoadOnDemand: 1
+
+Configuration.lua
