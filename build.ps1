@@ -11,7 +11,8 @@ $mainToc = Join-Path $root "SszorakHelper.toc"
 $optionsRoot = Join-Path $root "Options"
 $optionsToc = Join-Path $optionsRoot "SszorakHelper_Options.toc"
 
-if (-not $SkipVerify) { & (Join-Path $root "verify.ps1") }
+$verifyScript = Join-Path $root "verify.ps1"
+if (-not $SkipVerify -and (Test-Path -LiteralPath $verifyScript -PathType Leaf)) { & $verifyScript }
 
 $tocText = Get-Content -LiteralPath $mainToc -Raw
 if ($tocText -notmatch '(?m)^## Version:\s*(\d+\.\d+\.\d+(?:-\d+)?)\s*$') {

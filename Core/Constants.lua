@@ -2,6 +2,7 @@ local _, SH = ...
 
 SH.Const = {
     ENCOUNTER_ID = 3420,
+    INSTANCE_ID = 3004,
     PREFIX = "SSZHELP",
     PROTOCOL = 1,
     EXIT_POSITION = 1,
@@ -9,7 +10,7 @@ SH.Const = {
     WIND_POSITIONS = {2, 3, 4, 6, 7, 8},
     DIRECTIONS = {"Exit", "Northeast", "East", "Southeast", "Entrance", "Southwest", "West", "Northwest"},
     MARKER_NAMES = {"Star", "Circle", "Diamond", "Triangle", "Moon", "Square", "Cross", "Skull"},
-    DEFAULT_LAYOUT = {7, 4, 5, 6, 8, 1, 2, 3},
+    DEFAULT_LAYOUT = {5, 6, 4, 1, 8, 2, 7, 3},
     DIFFICULTIES = {
         {id = 17, name = "Raid Finder"},
         {id = 14, name = "Normal"},
@@ -30,5 +31,11 @@ function SH.Const:IsWindPosition(position)
 end
 
 function SH.Const:MarkerToken(markerID)
-    return string.format("{rt%d}", tonumber(markerID) or 8)
+    local id = tonumber(markerID) or 8
+    if id < 1 or id > 8 then id = 8 end
+    return string.format("|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_%d:0|t", id)
+end
+
+function SH.Const:MarkerName(markerID)
+    return self.MARKER_NAMES[tonumber(markerID) or 8] or "Skull"
 end

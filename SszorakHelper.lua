@@ -1,7 +1,7 @@
 local addonName, SH = ...
 
 SH.name = addonName
-SH.version = "0.1.0-8"
+SH.version = "12.1.0"
 SH.modules = {}
 SH.handlers = {}
 SH.frame = CreateFrame("Frame")

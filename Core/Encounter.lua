@@ -9,11 +9,15 @@ SH.Encounter = {
     revision = 0,
     timers = {},
     timelineEvents = {},
+    seenTimelineEvents = {},
 }
 SH.modules.Encounter = SH.Encounter
 
 local SURGE_SPELL_ID = 1305959
 local HOWLING_SPELL_ID = 1285732
+local SURGE_WARNING_LEAD = 3
+local INITIAL_SURGE_DURATIONS = {[29] = true, [32] = true, [36] = true}
+local VARIABLE_EVENT_DURATIONS = {[47] = true, [52] = true, [59] = true}
 
 local function spellName(spellID)
     return C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID)
@@ -64,7 +68,9 @@ function SH.Encounter:Start(encounterName, difficultyID)
     self.revision = 0
     self.assignments = {}
     self.surgeIndex = 0
+    self.variableTimelineStep = 0
     self.timelineEvents = {}
+    self.seenTimelineEvents = {}
     self:CancelTimers()
     SH.RoomMap:RefreshLayout()
     self:RefreshDisplays()
@@ -76,6 +82,7 @@ function SH.Encounter:Stop()
     self.active = false
     self:CancelTimers()
     self.timelineEvents = {}
+    self.seenTimelineEvents = {}
     SH.RoomMap:StopRotation()
     self:RefreshDisplays()
 end
@@ -156,11 +163,6 @@ end
 function SH.Encounter:OnAssignmentsComplete(source)
     local drops = self:ComputeDropOrder()
     SH.OrderFrame:Update(drops)
-    if self.active and SH.Comms:IsCoordinator() and source ~= "external" and source ~= "state" then
-        C_Timer.After(0.2, function()
-            if SH.Encounter.active and SH.Encounter:IsComplete() then SH.Comms:PublishDropOrder(SH.Encounter:ComputeDropOrder()) end
-        end)
-    end
 end
 
 function SH.Encounter:ImportExternalMarkers(markers)
@@ -191,52 +193,69 @@ function SH.Encounter:RefreshDisplays()
     SH.RoomMap:RefreshAssignments()
     SH.RoomMap:RefreshVisibility()
     if self:IsComplete() then
-        SH.OrderFrame:Update(self:ComputeDropOrder())
+        local drops = self:ComputeDropOrder()
+        SH.OrderFrame:Update(drops)
+        SH.NSRTMacros:SetOrder(drops)
     elseif previewing then
         local layout = SH.Store:GetLayout()
-        SH.OrderFrame:ShowPreview({layout[2], layout[3], layout[6], layout[1]})
+        local previewDrops = {layout[2], layout[3], layout[6], layout[1]}
+        SH.OrderFrame:ShowPreview(previewDrops)
+        SH.NSRTMacros:SetOrder(previewDrops)
     else
         SH.OrderFrame:Update(nil)
+        SH.NSRTMacros:SetOrder(nil)
     end
     local context = self.active or self.testMode or previewing
     local unlocked = context and not options.lockFrames
     SH.RoomMap:SetUnlocked(unlocked)
     SH.OrderFrame:SetUnlocked(unlocked)
+    SH.NSRTMacros:SetUnlocked(unlocked)
+    SH.NSRTMacros:RefreshVisibility()
 end
 
 function SH.Encounter:SendWarning(text, isTest)
-    if isTest then
-        if ChatFrame_ReplaceIconAndGroupExpressions then
-            text = ChatFrame_ReplaceIconAndGroupExpressions(text)
-        end
-        if RaidNotice_AddMessage and RaidWarningFrame then
-            RaidNotice_AddMessage(RaidWarningFrame, text, ChatTypeInfo.RAID_WARNING)
-        else
-            SH:Print(text)
-        end
-        return
+    if not isTest and not self.active then return end
+    if ChatFrame_ReplaceIconAndGroupExpressions then
+        text = ChatFrame_ReplaceIconAndGroupExpressions(text)
     end
-    if self.active and IsInRaid() and UnitIsGroupLeader("player") then
-        C_ChatInfo.SendChatMessage(text, "RAID_WARNING")
+    if RaidNotice_AddMessage and RaidWarningFrame then
+        RaidNotice_AddMessage(RaidWarningFrame, text, ChatTypeInfo.RAID_WARNING)
+    else
+        SH:Print(text)
     end
 end
 
+function SH.Encounter:SpeakWarning(text)
+    if not SH.Store:Options().ttsWarnings then return end
+    if not C_VoiceChat or not C_VoiceChat.SpeakText then return end
+    pcall(C_VoiceChat.SpeakText, 0, text, 0, 100, false)
+end
+
 function SH.Encounter:WarnSurge(index, isTest)
-    if not SH.Store:Options().raidWarningSurges and not isTest then return end
+    local options = SH.Store:Options()
+    local showWarning = options.raidWarningSurges or isTest
+    if not showWarning and not options.ttsWarnings then return end
     local drops = self:ComputeDropOrder()
     if not drops then
         if isTest then self:SendWarning("Surge assignments are incomplete", true) end
         return
     end
     local first = index == 1 and 1 or 3
-    self:SendWarning(string.format("Surges to %s and %s", SH.Const:MarkerToken(drops[first]), SH.Const:MarkerToken(drops[first + 1])), isTest)
+    if showWarning then
+        self:SendWarning(string.format("Surges to %s and %s", SH.Const:MarkerToken(drops[first]), SH.Const:MarkerToken(drops[first + 1])), isTest)
+    end
+    self:SpeakWarning(string.format("Surges to %s and %s", SH.Const:MarkerName(drops[first]), SH.Const:MarkerName(drops[first + 1])))
 end
 
 function SH.Encounter:WarnPush(index, isTest)
-    if not SH.Store:Options().raidWarningPushes and not isTest then return end
-    local position = self.assignments[index]
-    local markerID = position and SH.Store:GetLayout()[position]
-    if markerID then self:SendWarning("Push toward " .. SH.Const:MarkerToken(markerID), isTest) end
+    local options = SH.Store:Options()
+    local showWarning = options.raidWarningPushes or isTest
+    if not showWarning and not options.ttsWarnings then return end
+    local drops = self:ComputeDropOrder()
+    local markerID = drops and drops[index]
+    if not markerID then return end
+    if showWarning then self:SendWarning("Push toward " .. SH.Const:MarkerToken(markerID), isTest) end
+    self:SpeakWarning("Push toward " .. SH.Const:MarkerName(markerID))
 end
 
 function SH.Encounter:OnTimelineAdded(eventInfo)
@@ -244,18 +263,26 @@ function SH.Encounter:OnTimelineAdded(eventInfo)
     local eventID = eventInfo.id
     local duration = tonumber(eventInfo.duration)
     if not eventID or not duration then return end
+    if self.seenTimelineEvents[eventID] then return end
+    self.seenTimelineEvents[eventID] = true
 
-    if sameSpellName(eventInfo.spellName, SURGE_SPELL_ID) then
+    local rounded = math.floor(duration + 0.5)
+    local variableSurge = false
+    if VARIABLE_EVENT_DURATIONS[rounded] then
+        self.variableTimelineStep = ((self.variableTimelineStep or 0) % 3) + 1
+        variableSurge = self.variableTimelineStep == 2
+    end
+
+    if sameSpellName(eventInfo.spellName, SURGE_SPELL_ID) or INITIAL_SURGE_DURATIONS[rounded] or variableSurge then
         self.surgeIndex = (self.surgeIndex or 0) + 1
         local index = ((self.surgeIndex - 1) % 2) + 1
         self.timelineEvents[eventID] = {kind = "surge", index = index}
-        self.timers["surge" .. eventID] = C_Timer.NewTimer(math.max(0, duration - 2), function()
+        self.timers["surge" .. eventID] = C_Timer.NewTimer(math.max(0, duration - SURGE_WARNING_LEAD), function()
             if SH.Encounter.active then SH.Encounter:WarnSurge(index, false) end
         end)
         return
     end
 
-    local rounded = math.floor(duration + 0.5)
     if sameSpellName(eventInfo.spellName, HOWLING_SPELL_ID) or rounded == 100 or rounded == 111 or rounded == 125 then
         self.timelineEvents[eventID] = {kind = "digIn", started = false}
     end

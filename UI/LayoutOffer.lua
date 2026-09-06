@@ -33,14 +33,20 @@ function SH.LayoutOffer:OnInitialize()
         shade:Hide()
     end, "pink")
     temporary:SetPoint("LEFT", reject, "RIGHT", 18, 0)
-    local makeDefault = SH.Widgets:Button(frame, "Make Default", 150, 32, function()
+    local saveProfile = SH.Widgets:Button(frame, "Save Profile", 150, 32, function()
         local offer = SH.LayoutOffer.pending
-        if offer and SH.Store:SetDefaultLayout(offer.layout) then
-            SH.LayoutOffer:ApplyLayout()
+        if offer then
+            local profileName = SH.Store:UniqueProfileName("Raid Layout")
+            local profileID, reason = profileName and SH.Store:CreateProfile(profileName, offer.layout)
+            if profileID then
+                SH.LayoutOffer:ApplyLayout()
+            else
+                SH:Print(reason or "Could not save the raid layout profile.")
+            end
         end
         shade:Hide()
     end, "success")
-    makeDefault:SetPoint("LEFT", temporary, "RIGHT", 18, 0)
+    saveProfile:SetPoint("LEFT", temporary, "RIGHT", 18, 0)
 
     self.shade = shade
     self.frame = frame
@@ -48,12 +54,16 @@ end
 
 function SH.LayoutOffer:Show(sender, layout)
     self.pending = {sender = sender, layout = layout}
-    self.frame.message:SetText(string.format("%s wants to push a new marker layout. Reject it, use it for this raid group, or save it as your account-wide default.", sender or "The raid leader"))
+    self.frame.message:SetText(string.format("%s wants to push a new marker layout. Reject it, use it for this raid group, or save it as a named account-wide profile.", sender or "The raid leader"))
     self.shade:Show()
 end
 
 function SH.LayoutOffer:ApplyLayout()
     if SH.RoomMap then SH.RoomMap:RefreshLayout() end
+    if SH.NSRTMacros then
+        SH.NSRTMacros:RefreshLayout()
+        SH.NSRTMacros:RefreshVisibility()
+    end
     if SH.Encounter then SH.Encounter:RefreshDisplays() end
     if SH.OptionsUI and SH.OptionsUI.frame and SH.OptionsUI.frame:IsShown() then SH.OptionsUI:RefreshLayoutEditor() end
 end

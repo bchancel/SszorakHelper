@@ -25,6 +25,10 @@ local function namesMatch(a, b)
     return shortName(a) == shortName(b)
 end
 
+local function secretValue(value)
+    return type(issecretvalue) == "function" and issecretvalue(value)
+end
+
 function SH.Comms:OnInitialize()
     C_ChatInfo.RegisterAddonMessagePrefix(SH.Const.PREFIX)
     self:MarkPeer(unitName("player"))
@@ -39,12 +43,12 @@ function SH.Comms:OnInitialize()
     end)
     SH:RegisterEvent("GROUP_LEFT", function()
         SH.Store:ClearTemporaryLayout()
-        if SH.RoomMap then SH.RoomMap:RefreshLayout() end
+        if SH.LayoutOffer then SH.LayoutOffer:ApplyLayout() end
     end)
     SH:RegisterEvent("PLAYER_ENTERING_WORLD", function()
         if not IsInRaid() and SH.Store:HasTemporaryLayout() then
             SH.Store:ClearTemporaryLayout()
-            if SH.RoomMap then SH.RoomMap:RefreshLayout() end
+            if SH.LayoutOffer then SH.LayoutOffer:ApplyLayout() end
         end
     end)
 end
@@ -152,29 +156,12 @@ function SH.Comms:BroadcastReset()
     end
 end
 
-function SH.Comms:PublishDropOrder(markers, firstIndex)
-    if not IsInRaid() or type(markers) ~= "table" then return end
-    firstIndex = firstIndex or 1
-    for index = firstIndex, 4 do
-        local markerID = tonumber(markers[index])
-        if markerID then
-            local publishedMarker = markerID
-            local delay = (index - firstIndex) * 0.35
-            C_Timer.After(delay, function()
-                if SH.Encounter and SH.Encounter.active then
-                    C_ChatInfo.SendChatMessage(tostring(publishedMarker), "RAID")
-                end
-            end)
-        end
-    end
-end
-
 function SH.Comms:PublishLayout()
     if not IsInRaid() or not UnitIsGroupLeader("player") then
         SH:Print("Only the raid leader can publish a marker layout.")
         return false
     end
-    local layout = SH.Store:GetDefaultLayout()
+    local layout = SH.Store:GetLayout()
     local values = {}
     for position = 1, 8 do values[position] = tostring(layout[position]) end
     self:Send("LAYOUT|" .. table.concat(values, ","))
@@ -220,6 +207,7 @@ end
 function SH.Comms:OnRaidMessage(message, sender)
     if not (SH.Encounter and SH.Encounter.active) or SH.Encounter:IsComplete() then return end
     if not self:IsCoordinator() then return end
+    if secretValue(message) or secretValue(sender) then return end
     local markerID = tonumber(tostring(message or ""):match("^%s*([1-8])%s*$"))
     if not markerID then return end
 
@@ -245,11 +233,5 @@ function SH.Comms:FinalizeExternal(hadExit)
     self.externalToken = nil
     local markers = {self.externalMarkers[1], self.externalMarkers[2], self.externalMarkers[3]}
     self.externalMarkers = {}
-    local completed = SH.Encounter:ImportExternalMarkers(markers)
-    if completed and not hadExit then
-        local drops = SH.Encounter:ComputeDropOrder()
-        C_Timer.After(0.15, function()
-            if SH.Encounter and SH.Encounter.active then SH.Comms:PublishDropOrder(drops, 4) end
-        end)
-    end
+    SH.Encounter:ImportExternalMarkers(markers)
 end

@@ -16,9 +16,33 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Verify addon
+      - name: Verify addon manifests
         shell: pwsh
-        run: ./verify.ps1
+        run: |
+          $ErrorActionPreference = "Stop"
+          $manifests = @(
+            @{ Toc = "SszorakHelper.toc"; Root = "." },
+            @{ Toc = "Options/SszorakHelper_Options.toc"; Root = "Options" }
+          )
+          foreach ($manifest in $manifests) {
+            Get-Content -LiteralPath $manifest.Toc | ForEach-Object {
+              $entry = $_.Trim()
+              if ($entry -and -not $entry.StartsWith("#")) {
+                $path = Join-Path $manifest.Root $entry
+                if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+                  throw "Missing TOC file: $path"
+                }
+              }
+            }
+          }
+          $mainVersion = (Select-String -Path "SszorakHelper.toc" -Pattern '^## Version:\s*(\S+)').Matches[0].Groups[1].Value
+          $optionsVersion = (Select-String -Path "Options/SszorakHelper_Options.toc" -Pattern '^## Version:\s*(\S+)').Matches[0].Groups[1].Value
+          $luaVersion = (Select-String -Path "SszorakHelper.lua" -Pattern '^SH\.version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          if ($mainVersion -ne $optionsVersion -or $mainVersion -ne $luaVersion) {
+            throw "Version mismatch: main=$mainVersion options=$optionsVersion lua=$luaVersion"
+          }
+          $protectedChat = Get-ChildItem -Recurse -Filter "*.lua" | Select-String -Pattern '\bSendChatMessage\b'
+          if ($protectedChat) { throw "Protected SendChatMessage call found in addon source." }
 
       - uses: BigWigsMods/packager@v2
         with:

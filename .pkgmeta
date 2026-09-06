@@ -14,6 +14,7 @@ ignore:
   - .gitignore
   - .pkgmeta
   - AGENTS.md
+  - ARCHITECTURE.md
   - CHANGELOG.md
   - README.md
   - build.ps1

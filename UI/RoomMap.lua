@@ -4,6 +4,7 @@ SH.RoomMap = {initializeOrder = 30}
 SH.modules.RoomMap = SH.RoomMap
 
 local TWO_PI = math.pi * 2
+local INTERMISSION_ROOM_ROTATION = math.pi / 4
 local MAP_RADIUS = 104
 local EDGE_RADIUS = 126
 
@@ -53,6 +54,13 @@ function SH.RoomMap:OnInitialize()
         group.marker = group:CreateTexture(nil, "OVERLAY")
         group.marker:SetSize(36, 36)
         group.marker:SetPoint("TOP", 0, 0)
+        group.dropBadge = CreateFrame("Frame", nil, group, "BackdropTemplate")
+        group.dropBadge:SetSize(22, 22)
+        group.dropBadge:SetPoint("TOPRIGHT", group.marker, "TOPRIGHT", 7, 7)
+        SH.Widgets:ApplyBackdrop(group.dropBadge, SH.Widgets.colors.pink, SH.Widgets.colors.pinkBorder)
+        group.dropBadge.text = SH.Widgets:Text(group.dropBadge, "")
+        group.dropBadge.text:SetPoint("CENTER")
+        group.dropBadge:Hide()
         group.buttons = {}
         if SH.Const:IsWindPosition(position) then
             for order = 1, 3 do
@@ -99,7 +107,7 @@ end
 function SH.RoomMap:ApplyBackgroundOpacity()
     local opacity = math.max(0, math.min(1, tonumber(SH.Store:Options().frameBackgroundOpacity) or 1))
     self.frame:SetBackdropColor(0.035, 0.064, 0.084, opacity)
-    self.frame.circle:SetVertexColor(0.025, 0.05, 0.065, opacity)
+    self.frame.circle:SetVertexColor(0.025, 0.05, 0.065, 0)
 end
 
 function SH.RoomMap:Reposition(rotation)
@@ -129,7 +137,7 @@ function SH.RoomMap:PrepareRotatingMarkers()
     local layerHalf = layerSize * 0.5
     local markerHalf = 36 * rotationScale * 0.5
     for position, marker in ipairs(self.frame.rotatingMarkers) do
-        local x, y = pointFor(position, MAP_RADIUS, 0)
+        local x, y = pointFor(position, MAP_RADIUS, INTERMISSION_ROOM_ROTATION)
         local targetX = x * rotationScale
         local targetY = (y - 5) * rotationScale
         marker:SetRotation(0)
@@ -161,6 +169,7 @@ function SH.RoomMap:RefreshAssignments()
     for _, position in pairs(assignments) do usedPositions[position] = true end
 
     for position, group in ipairs(self.frame.groups) do
+        group.dropBadge:Hide()
         for order, button in pairs(group.buttons) do
             local selectedHere = assignments[order] == position
             local orderTaken = assignments[order] ~= nil and not selectedHere
@@ -168,6 +177,16 @@ function SH.RoomMap:RefreshAssignments()
             button._shEnabledStyle = selectedHere and "success" or "secondary"
             SH.Widgets:SetEnabled(button, not orderTaken and not positionTaken)
             if selectedHere then SH.Widgets:StyleButton(button, "success") end
+        end
+    end
+    if SH.Encounter and SH.Encounter:IsComplete() then
+        for order = 1, 3 do
+            local dropPosition = SH.Const:Opposite(assignments[order])
+            local group = self.frame.groups[dropPosition]
+            if group then
+                group.dropBadge.text:SetText(tostring(order))
+                group.dropBadge:Show()
+            end
         end
     end
     self.frame.clear:SetShown(SH.Store:Options().showClearButton == true and not self.rotating)

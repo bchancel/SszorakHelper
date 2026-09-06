@@ -1,4 +1,8 @@
 deploy.ps1
+update_and_push.ps1
+AGENTS.md
+verify.ps1
+ARCHITECTURE.md
 dist/
 .build/
 *.zip
