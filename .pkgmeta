@@ -21,3 +21,4 @@ ignore:
   - deploy.ps1
   - update_and_push.ps1
   - verify.ps1
+  - tests

@@ -2,7 +2,7 @@
 ## Title: Sszorak Helper Options
 ## Notes: Load-on-demand configuration for Sszorak Helper.
 ## Author: Sszorak Helper
-## Version: 12.1.0
+## Version: 12.1.1
 ## Dependencies: SszorakHelper
 ## LoadOnDemand: 1
 

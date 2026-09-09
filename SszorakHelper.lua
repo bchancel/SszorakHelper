@@ -1,7 +1,7 @@
 local addonName, SH = ...
 
 SH.name = addonName
-SH.version = "12.1.0"
+SH.version = "12.1.1"
 SH.modules = {}
 SH.handlers = {}
 SH.frame = CreateFrame("Frame")
@@ -58,6 +58,7 @@ local function showHelp()
     SH:Print("Commands:")
     SH:Print("/sszorak config (or /sh config) - open configuration")
     SH:Print("/sszorak test (or /sh test) - toggle test mode")
+    SH:Print("/sh macros - show/hide the NSRT macro panel before combat")
     SH:Print("/sszorak help (or /sh help) - show this help")
 end
 
@@ -67,13 +68,15 @@ SlashCmdList.SSZORAKHELPER = function(input)
     local command = strtrim(input or ""):lower()
     if command == "config" or command == "options" or command == "" then
         if SH.OptionsLoader then SH.OptionsLoader:Open() end
+    elseif command == "macros" then
+        SH.NSRTMacros:TogglePanel()
     elseif command == "test" then
         if SH.Encounter and SH.Encounter.testMode and SH.OptionsUI then
             SH.OptionsUI:QuitTestMode()
         elseif SH.OptionsLoader then
             SH.OptionsLoader:Open(function()
                 if SH.OptionsUI then SH.OptionsUI:EnterTestMode() end
-            end)
+            end, true)
         end
     else
         showHelp()

@@ -26,6 +26,10 @@ function SH.OrderFrame:OnInitialize()
         slot.icon = slot:CreateTexture(nil, "ARTWORK")
         slot.icon:SetSize(36, 36)
         slot.icon:SetPoint("BOTTOM")
+        slot.received = slot:CreateFontString(nil, "ARTWORK")
+        slot.received:SetFont(STANDARD_TEXT_FONT, 16)
+        slot.received:SetPoint("BOTTOM")
+        slot.received:Hide()
         frame.slots[index] = slot
     end
 
@@ -51,7 +55,9 @@ end
 
 function SH.OrderFrame:Update(markers)
     self.markers = markers
+    self.receivedCount = nil
     for index, slot in ipairs(self.frame.slots) do
+        slot.received:Hide()
         local markerID = markers and tonumber(markers[index])
         if markerID then
             slot.icon:SetTexture(string.format("Interface\\TargetingFrame\\UI-RaidTargetingIcon_%d", markerID))
@@ -63,10 +69,27 @@ function SH.OrderFrame:Update(markers)
     self:RefreshVisibility()
 end
 
+function SH.OrderFrame:ShowReceived(markers, count)
+    self.markers = nil
+    self.receivedCount = count
+    for index, slot in ipairs(self.frame.slots) do
+        slot.icon:Hide()
+        slot.received:Hide()
+        if index <= count then
+            slot.received:SetFormattedText("|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_%s:36:36|t", markers[index])
+            slot.received:Show()
+        elseif index == 4 then
+            slot.icon:SetTexture(string.format("Interface\\TargetingFrame\\UI-RaidTargetingIcon_%d", SH.Store:GetLayout()[SH.Const.EXIT_POSITION]))
+            slot.icon:Show()
+        end
+    end
+    self:RefreshVisibility()
+end
+
 function SH.OrderFrame:RefreshVisibility()
     local options = SH.Store:Options()
     local context = (SH.Encounter and SH.Encounter.active) or (SH.Encounter and SH.Encounter.testMode) or options.previewFrames
-    self.frame:SetShown(context and options.showOrderFrame and self.markers ~= nil)
+    self.frame:SetShown(context and options.showOrderFrame and (self.markers ~= nil or self.receivedCount ~= nil))
 end
 
 function SH.OrderFrame:ShowPreview(markers)

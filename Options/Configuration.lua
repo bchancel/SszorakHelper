@@ -92,7 +92,7 @@ function UI:Ensure()
     if self.frame then return end
 
     local frame = CreateFrame("Frame", "SszorakHelperOptionsFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(900, 858)
+    frame:SetSize(900, 926)
     frame:SetFrameStrata("FULLSCREEN_DIALOG")
     frame:SetToplevel(true)
     frame:SetClampedToScreen(true)
@@ -140,7 +140,7 @@ function UI:Ensure()
     resetLayout.tooltip = "Restore the currently selected layout to Sszorak Helper's original marker arrangement."
     resetLayout._shEnabledStyle = "secondary"
 
-    local note = SH.Widgets:Label(nav, "Turn off Lock Frames, then drag the room map or wind order frame. The NSRT macros follow the room map.")
+    local note = SH.Widgets:Label(nav, "Turn off Lock Frames, then drag the room map, wind order frame, or personal warning. The NSRT macros follow the room map.")
     note:SetPoint("TOPLEFT", 18, -278)
     note:SetWidth(134)
     note:SetWordWrap(true)
@@ -200,11 +200,24 @@ function UI:Ensure()
     end)
     addToggle(intermission, "Show Push Direction Warning", CELL_RIGHT, -34, function() return options.raidWarningPushes end, function(v) options.raidWarningPushes = v end)
 
-    local other = makeSection(content, "Other Options", -372, 70)
+    local other = makeSection(content, "Personal Warnings / NSRT", -372, 138)
     addToggle(other, "Show Drop Location Warning", CELL_LEFT, -34, function() return options.raidWarningSurges end, function(v) options.raidWarningSurges = v end)
     addToggle(other, "TTS Warnings", CELL_RIGHT, -34, function() return options.ttsWarnings end, function(v) options.ttsWarnings = v end)
-
-    local difficulty = makeSection(content, "Enabled Difficulties", -450, 104)
+    local fontCell = optionCell(other, CELL_LEFT, -68, CELL_WIDTH)
+    self.warningFontLabel = cellLabel(fontCell, "")
+    self.warningFontSlider = SH.Widgets:Slider(fontCell, 150, 12, 72, 1, function(value, userInput)
+        options.personalWarningFontSize = math.floor(value + 0.5)
+        SH.PersonalWarning:ApplyFontSize()
+        UI.warningFontLabel:SetText(string.format("Warning Font: %d px", options.personalWarningFontSize))
+        if userInput then SH.PersonalWarning:Show("%s", "Personal warning preview") end
+    end)
+    self.warningFontSlider:SetPoint("RIGHT", -12, 0)
+    addToggle(other, "Receive NSRT Raid Messages", CELL_RIGHT, -68, function() return options.receiveNSRT end, function(v)
+        options.receiveNSRT = v
+        SH.Comms.receivedCount = 0
+        SH.Comms.receivedMarkers = {}
+    end)
+    local difficulty = makeSection(content, "Enabled Difficulties", -518, 104)
     for index, definition in ipairs(SH.Const.DIFFICULTIES) do
         local difficultyID = definition.id
         local column = (index - 1) % 2
@@ -214,7 +227,7 @@ function UI:Ensure()
             function(v) options.difficulties[difficultyID] = v end)
     end
 
-    local layoutSection = makeSection(content, "Marker Layout", -562, 280)
+    local layoutSection = makeSection(content, "Marker Layout", -630, 280)
     local layoutHint = SH.Widgets:Label(layoutSection, "Choose New to edit. Click two positions to swap their markers.")
     layoutHint:SetPoint("TOPLEFT", 10, -38)
     layoutHint:SetWidth(450)
@@ -529,6 +542,11 @@ function UI:SelectLayoutPosition(position)
 end
 
 function UI:Refresh()
+    SH.PersonalWarning:ApplyFontSize()
+    self.warningFontSlider._shUpdating = true
+    self.warningFontSlider:SetValue(SH.Store:Options().personalWarningFontSize)
+    self.warningFontSlider._shUpdating = false
+    self.warningFontLabel:SetText(string.format("Warning Font: %d px", SH.Store:Options().personalWarningFontSize))
     for _, entry in ipairs(self.optionChecks) do entry.check:SetChecked(entry.getter()) end
     if self.createMacrosButton then self.createMacrosButton:SetShown(SH.Store:Options().showNSRTMacros) end
     for _, entry in ipairs(self.scaleControls) do
@@ -540,7 +558,7 @@ function UI:Refresh()
     end
     self:RefreshOpacityControl()
     self:RefreshLayoutEditor()
-    local canPublish = IsInRaid() and UnitIsGroupLeader("player")
+    local canPublish = IsInRaid() and UnitIsGroupLeader("player") and not SH.Comms:IsLockedDown()
     self.publishButton._shEnabledStyle = "success"
     SH.Widgets:SetEnabled(self.publishButton, canPublish)
 end
@@ -563,7 +581,7 @@ function UI:EnsureTestFrame()
     SH.Store:ApplyFrame("test", frame)
     local title = SH.Widgets:Text(frame, "Test Frame", true)
     title:SetPoint("TOPLEFT", 16, -14)
-    local hint = SH.Widgets:Label(frame, "Fake events stay local.")
+    local hint = SH.Widgets:Label(frame, "Macros send to your raid.")
     hint:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
     hint:SetTextColor(unpack(SH.Widgets.colors.textMuted))
 

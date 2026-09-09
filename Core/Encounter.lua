@@ -24,7 +24,7 @@ local function spellName(spellID)
 end
 
 local function readable(value)
-    return value ~= nil and (not issecretvalue or not issecretvalue(value))
+    return (not issecretvalue or not issecretvalue(value)) and value ~= nil
 end
 
 local function sameSpellName(value, spellID)
@@ -68,18 +68,21 @@ function SH.Encounter:Start(encounterName, difficultyID)
     self.revision = 0
     self.assignments = {}
     self.surgeIndex = 0
+    SH.Comms.receivedCount = 0
+    SH.Comms.receivedMarkers = {}
     self.variableTimelineStep = 0
     self.timelineEvents = {}
     self.seenTimelineEvents = {}
     self:CancelTimers()
     SH.RoomMap:RefreshLayout()
     self:RefreshDisplays()
-    SH.Comms:Announce(true)
-    C_Timer.After(1, function() if SH.Encounter.active then SH.Comms:Announce(true) end end)
 end
 
 function SH.Encounter:Stop()
     self.active = false
+    SH.PersonalWarning:Hide()
+    SH.Comms.receivedCount = 0
+    SH.Comms.receivedMarkers = {}
     self:CancelTimers()
     self.timelineEvents = {}
     self.seenTimelineEvents = {}
@@ -101,89 +104,56 @@ function SH.Encounter:IsPositionUsed(position)
     return false
 end
 
-function SH.Encounter:AcceptProposal(order, position, _, source)
+function SH.Encounter:AcceptProposal(order, position)
     order, position = tonumber(order), tonumber(position)
     if not order or order < 1 or order > 3 or not SH.Const:IsWindPosition(position) then return false end
     if self.assignments[order] or self:IsPositionUsed(position) then return false end
     self.assignments[order] = position
     self.revision = self.revision + 1
     self:RefreshDisplays()
-    if self.active and SH.Comms:IsCoordinator() then SH.Comms:BroadcastState() end
-    if self:IsComplete() then self:OnAssignmentsComplete(source) end
+    if self:IsComplete() then self:OnAssignmentsComplete() end
     return true
 end
 
-function SH.Encounter:ApplyState(cycle, revision, assignments)
-    if cycle ~= self.cycle or not revision or revision < self.revision then return end
-    local validated, used = {}, {}
-    for order = 1, 3 do
-        local position = tonumber(assignments[order])
-        if position and position ~= 0 and SH.Const:IsWindPosition(position) and not used[position] then
-            validated[order] = position
-            used[position] = true
-        end
-    end
-    local wasComplete = self:IsComplete()
-    self.assignments = validated
-    self.revision = revision
-    self:RefreshDisplays()
-    if not wasComplete and self:IsComplete() then self:OnAssignmentsComplete("state") end
-end
-
-function SH.Encounter:ClearAssignments(source)
+function SH.Encounter:ClearAssignments()
+    SH.PersonalWarning:Hide()
     self.assignments = {}
+    SH.Comms.receivedCount = 0
+    SH.Comms.receivedMarkers = {}
     self.revision = 0
     SH.OrderFrame:Update(nil)
     self:RefreshDisplays()
-    if self.active and source ~= "remote" and SH.Comms:IsCoordinator() then SH.Comms:BroadcastState() end
 end
 
-function SH.Encounter:ResetForNextPhase(targetCycle, broadcast)
+function SH.Encounter:ResetForNextPhase()
+    SH.PersonalWarning:Hide()
     self.assignments = {}
-    self.cycle = targetCycle or (self.cycle + 1)
+    SH.Comms.receivedCount = 0
+    SH.Comms.receivedMarkers = {}
+    self.cycle = self.cycle + 1
     self.revision = 0
     self.surgeIndex = 0
-    SH.Comms.externalMarkers = {}
     SH.OrderFrame:Update(nil)
     self:RefreshDisplays()
-    if broadcast ~= false then SH.Comms:BroadcastReset() end
 end
 
 function SH.Encounter:ComputeDropOrder()
     if not self:IsComplete() then return nil end
     local layout = SH.Store:GetLayout()
-    local drops = {}
+    local dropPositions = {}
     for order = 1, 3 do
-        drops[order] = layout[SH.Const:Opposite(self.assignments[order])]
+        dropPositions[order] = SH.Const:Opposite(self.assignments[order])
     end
-    drops[4] = layout[SH.Const.EXIT_POSITION]
-    return drops
+
+    dropPositions[4] = SH.Const.EXIT_POSITION
+    local drops = {}
+    for order = 1, 4 do drops[order] = layout[dropPositions[order]] end
+    return drops, dropPositions
 end
 
-function SH.Encounter:OnAssignmentsComplete(source)
+function SH.Encounter:OnAssignmentsComplete()
     local drops = self:ComputeDropOrder()
     SH.OrderFrame:Update(drops)
-end
-
-function SH.Encounter:ImportExternalMarkers(markers)
-    if self:IsComplete() then return false end
-    local layout = SH.Store:GetLayout()
-    local markerPositions = {}
-    for position, markerID in ipairs(layout) do markerPositions[markerID] = position end
-    local imported, used = {}, {}
-    for order = 1, 3 do
-        local dropPosition = markerPositions[tonumber(markers[order])]
-        local windPosition = dropPosition and SH.Const:Opposite(dropPosition)
-        if not windPosition or not SH.Const:IsWindPosition(windPosition) or used[windPosition] then return false end
-        imported[order] = windPosition
-        used[windPosition] = true
-    end
-    self.assignments = imported
-    self.revision = self.revision + 1
-    self:RefreshDisplays()
-    SH.Comms:BroadcastState()
-    self:OnAssignmentsComplete("external")
-    return true
 end
 
 function SH.Encounter:RefreshDisplays()
@@ -202,7 +172,11 @@ function SH.Encounter:RefreshDisplays()
         SH.OrderFrame:ShowPreview(previewDrops)
         SH.NSRTMacros:SetOrder(previewDrops)
     else
-        SH.OrderFrame:Update(nil)
+        if (self.active or self.testMode) and SH.Store:Options().receiveNSRT and (SH.Comms.receivedCount or 0) > 0 then
+            SH.OrderFrame:ShowReceived(SH.Comms.receivedMarkers, SH.Comms.receivedCount)
+        else
+            SH.OrderFrame:Update(nil)
+        end
         SH.NSRTMacros:SetOrder(nil)
     end
     local context = self.active or self.testMode or previewing
@@ -211,18 +185,13 @@ function SH.Encounter:RefreshDisplays()
     SH.OrderFrame:SetUnlocked(unlocked)
     SH.NSRTMacros:SetUnlocked(unlocked)
     SH.NSRTMacros:RefreshVisibility()
+    SH.PersonalWarning:SetUnlocked(unlocked)
+    SH.PersonalWarning:RefreshVisibility()
 end
 
 function SH.Encounter:SendWarning(text, isTest)
     if not isTest and not self.active then return end
-    if ChatFrame_ReplaceIconAndGroupExpressions then
-        text = ChatFrame_ReplaceIconAndGroupExpressions(text)
-    end
-    if RaidNotice_AddMessage and RaidWarningFrame then
-        RaidNotice_AddMessage(RaidWarningFrame, text, ChatTypeInfo.RAID_WARNING)
-    else
-        SH:Print(text)
-    end
+    SH.PersonalWarning:Show("%s", text)
 end
 
 function SH.Encounter:SpeakWarning(text)
@@ -232,11 +201,24 @@ function SH.Encounter:SpeakWarning(text)
 end
 
 function SH.Encounter:WarnSurge(index, isTest)
+    if not isTest and not self.active then return end
     local options = SH.Store:Options()
     local showWarning = options.raidWarningSurges or isTest
     if not showWarning and not options.ttsWarnings then return end
     local drops = self:ComputeDropOrder()
     if not drops then
+        local first = index == 1 and 1 or 3
+        if showWarning and SH.Store:Options().receiveNSRT and (SH.Comms.receivedCount or 0) >= first then
+            local markers = SH.Comms.receivedMarkers
+            local second = first + 1
+            if (SH.Comms.receivedCount or 0) >= second or second == 4 then
+                local secondMarker = SH.Store:GetLayout()[SH.Const.EXIT_POSITION]
+                if second <= SH.Comms.receivedCount then secondMarker = markers[second] end
+                SH.PersonalWarning:Show("Surges to |TInterface\\TargetingFrame\\UI-RaidTargetingIcon_%s:0|t and |TInterface\\TargetingFrame\\UI-RaidTargetingIcon_%s:0|t",
+                    markers[first], secondMarker)
+                return
+            end
+        end
         if isTest then self:SendWarning("Surge assignments are incomplete", true) end
         return
     end
@@ -248,18 +230,26 @@ function SH.Encounter:WarnSurge(index, isTest)
 end
 
 function SH.Encounter:WarnPush(index, isTest)
+    if not isTest and not self.active then return end
     local options = SH.Store:Options()
     local showWarning = options.raidWarningPushes or isTest
     if not showWarning and not options.ttsWarnings then return end
     local drops = self:ComputeDropOrder()
     local markerID = drops and drops[index]
-    if not markerID then return end
+    if not markerID then
+        if showWarning and SH.Store:Options().receiveNSRT and (SH.Comms.receivedCount or 0) >= index then
+            SH.PersonalWarning:Show("Push toward |TInterface\\TargetingFrame\\UI-RaidTargetingIcon_%s:0|t", SH.Comms.receivedMarkers[index])
+        end
+        return
+    end
     if showWarning then self:SendWarning("Push toward " .. SH.Const:MarkerToken(markerID), isTest) end
     self:SpeakWarning("Push toward " .. SH.Const:MarkerName(markerID))
 end
 
 function SH.Encounter:OnTimelineAdded(eventInfo)
-    if not self.active or type(eventInfo) ~= "table" or eventInfo.source ~= 0 then return end
+    if not self.active or not readable(eventInfo) or type(eventInfo) ~= "table" then return end
+    if not readable(eventInfo.source) or eventInfo.source ~= 0 then return end
+    if not readable(eventInfo.id) or not readable(eventInfo.duration) then return end
     local eventID = eventInfo.id
     local duration = tonumber(eventInfo.duration)
     if not eventID or not duration then return end
@@ -293,7 +283,7 @@ function SH.Encounter:OnTimelineChanged(eventID)
     local tracked = self.timelineEvents[eventID]
     if not tracked then return end
     local ok, state = pcall(C_EncounterTimeline.GetEventState, eventID)
-    if not ok then return end
+    if not ok or not readable(state) then return end
     if tracked.kind == "surge" and (state == 2 or state == 3) then
         cancelTimer(self.timers["surge" .. eventID])
         self.timers["surge" .. eventID] = nil
@@ -311,7 +301,7 @@ function SH.Encounter:StartIntermission(isTest)
     self.timers.rotationStop = C_Timer.NewTimer(25, function() SH.RoomMap:StopRotation() end)
     if not isTest then
         self.timers.phaseReset = C_Timer.NewTimer(30, function()
-            if SH.Encounter.active then SH.Encounter:ResetForNextPhase(nil, true) end
+            if SH.Encounter.active then SH.Encounter:ResetForNextPhase() end
         end)
     end
 end
@@ -319,6 +309,8 @@ end
 function SH.Encounter:EnterTestMode()
     if self.active then SH:Print("Test mode is unavailable during the Sszorak encounter."); return false end
     self:CancelTimers()
+    SH.Comms.receivedCount = 0
+    SH.Comms.receivedMarkers = {}
     self.testMode = true
     self.cycle = 1
     self.revision = 0
@@ -337,6 +329,7 @@ end
 
 function SH.Encounter:QuitTestMode()
     self:CancelTimers()
+    SH.PersonalWarning:Hide()
     self.testMode = false
     self.assignments = {}
     SH.RoomMap:StopRotation()
