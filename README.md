@@ -16,6 +16,7 @@ Retail target: WoW `12.1.0` / interface `120100`.
 - Shows a separate movable four-marker drop-order frame.
 - Shows an optional six-button NSRT macro panel for side markers only, with suggested click order 1-3.
 - Supports detached macro-panel positioning and optional room-based auto-show/hide.
+- Shows and hides the enabled room mini map with automatic NSRT room changes, including before the pull and after a wipe.
 - Shows optional movable Surge Targets bars with names, drop icons, countdowns, and previews.
 - Displays personal Surge-pair and push-direction warnings with an adjustable font; local selections can also supply spoken marker names.
 - Rotates the room map during the intermission with minimal runtime work.

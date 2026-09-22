@@ -200,7 +200,9 @@ end
 
 function SH.RoomMap:RefreshVisibility()
     local options = SH.Store:Options()
-    local context = (SH.Encounter and SH.Encounter.active) or (SH.Encounter and SH.Encounter.testMode) or options.previewFrames
+    local autoShown = options.nsrtAutoShow and options.showNSRTMacros and SH.NSRTMacros and SH.NSRTMacros.autoRoomVisible
+    local context = (SH.Encounter and SH.Encounter.active) or (SH.Encounter and SH.Encounter.testMode) or options.previewFrames or autoShown
+    self:SetUnlocked(context and not options.lockFrames)
     self.frame:SetShown(context and options.showRoomMap)
 end
 

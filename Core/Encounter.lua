@@ -185,7 +185,6 @@ function SH.Encounter:RefreshDisplays()
     end
     local context = self.active or self.testMode or previewing
     local unlocked = context and not options.lockFrames
-    SH.RoomMap:SetUnlocked(unlocked)
     SH.OrderFrame:SetUnlocked(unlocked)
     SH.NSRTMacros:SetUnlocked(unlocked)
     SH.NSRTMacros:RefreshVisibility()

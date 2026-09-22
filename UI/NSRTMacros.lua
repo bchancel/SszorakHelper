@@ -67,13 +67,18 @@ function SH.NSRTMacros:OnZoneChanged()
     end
     self.inRoom = inRoom
     self.lastSubzone = subzone
+    if not supported or not options.nsrtAutoShow or not options.showNSRTMacros then
+        self.autoRoomVisible = false
+    end
     if self.pendingAutoVisibility ~= nil and not InCombatLockdown() then
         options.nsrtPanelOpen = self.pendingAutoVisibility
+        self.autoRoomVisible = self.pendingAutoVisibility
         self.pendingAutoVisibility = nil
         -- Automatic hiding affects the live panel; explicit Preview/Test Mode still works.
         self.panelHidden = false
     end
     self:RefreshVisibility()
+    SH.RoomMap:RefreshVisibility()
 end
 
 function SH.NSRTMacros:TogglePanel()

@@ -1,3 +1,7 @@
+## Unreleased
+
+- Show and hide the room mini map alongside the NSRT macro panel during automatic room changes, respecting Room Mini Map and Lock Frames settings.
+
 ## 12.1.2
 
 - Add a dedicated NSRT Macro Buttons section with macro creation and an Attach to Map option. Detached panels save their own position.

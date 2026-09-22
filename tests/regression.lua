@@ -642,8 +642,62 @@ combat = false
 
 loadModule("UI/RoomMap.lua")
 SH.RoomMap.frame = frame()
+SH.RoomMap.frame.title = frame()
 SH.RoomMap:ApplyScale()
 check(SH.RoomMap.frame.scale == 0.75, "100 percent map scale did not map to old 75 percent")
+
+-- The real room-map visibility follows committed auto-room transitions, including regen.
+options.nsrtAutoShow, options.showNSRTMacros, options.showRoomMap = true, true, true
+options.previewFrames, options.lockFrames = false, false
+instanceID, subzone = 3004, "The Serpent Warren"
+SH.NSRTMacros:OnZoneChanged()
+check(not SH.RoomMap.frame:IsShown(), "room map shown before entering altar")
+subzone = "Altar of the Six Winds"
+SH.NSRTMacros:OnZoneChanged()
+check(SH.RoomMap.frame:IsShown() and SH.NSRTMacros.secureFrame:IsShown(), "altar did not show both frames")
+check(SH.RoomMap.frame._shUnlocked, "auto-shown room map could not be moved")
+options.showRoomMap = false
+SH.RoomMap:RefreshVisibility()
+check(not SH.RoomMap.frame:IsShown(), "auto-room ignored map enable toggle")
+options.showRoomMap, options.lockFrames = true, true
+SH.RoomMap:RefreshVisibility()
+check(SH.RoomMap.frame:IsShown() and not SH.RoomMap.frame._shUnlocked, "auto-shown map ignored frame lock")
+SH.Encounter.active = true
+SH.RoomMap:RefreshVisibility()
+SH.Encounter.active = false
+SH.RoomMap:RefreshVisibility()
+check(SH.RoomMap.frame:IsShown(), "ending encounter in altar hid auto-shown map")
+for _, room in ipairs({"The Serpent Warren", "Pit of Fangs"}) do
+    combat = true
+    subzone = room
+    SH.NSRTMacros:OnZoneChanged()
+    check(SH.RoomMap.frame:IsShown() and SH.NSRTMacros.secureFrame:IsShown(), "room map hid before macros during combat")
+    combat = false
+    for _, callback in ipairs(handlers.PLAYER_REGEN_ENABLED) do callback() end
+    check(not SH.RoomMap.frame:IsShown() and not SH.NSRTMacros.secureFrame:IsShown(), "room exit did not hide both frames")
+    combat = true
+    subzone = "Altar of the Six Winds"
+    SH.NSRTMacros:OnZoneChanged()
+    check(not SH.RoomMap.frame:IsShown(), "room map showed before macros during combat")
+    combat = false
+    for _, callback in ipairs(handlers.PLAYER_REGEN_ENABLED) do callback() end
+    check(SH.RoomMap.frame:IsShown(), "deferred altar entry did not show map")
+end
+options.nsrtAutoShow = false
+SH.RoomMap:RefreshVisibility()
+check(not SH.RoomMap.frame:IsShown(), "disabling automation left room map visible")
+options.previewFrames = true
+SH.RoomMap:RefreshVisibility()
+check(SH.RoomMap.frame:IsShown(), "map preview stopped working without automation")
+options.previewFrames = false
+SH.Encounter.testMode = true
+SH.RoomMap:RefreshVisibility()
+check(SH.RoomMap.frame:IsShown(), "map test mode stopped working without automation")
+SH.Encounter.testMode = false
+options.nsrtAutoShow = true
+instanceID = 1
+SH.NSRTMacros:OnZoneChanged()
+check(not SH.RoomMap.frame:IsShown(), "leaving instance retained auto-shown map")
 
 -- Compile every shipped Lua file, including load-on-demand configuration.
 for _, toc in ipairs({"SszorakHelper.toc", "Options/SszorakHelper_Options.toc"}) do
