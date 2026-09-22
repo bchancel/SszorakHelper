@@ -1,3 +1,13 @@
+## 12.1.2
+
+- Add a dedicated NSRT Macro Buttons section with macro creation and an Attach to Map option. Detached panels save their own position.
+- Add optional automatic macro-panel visibility: show at Altar of the Six Winds, hide at The Serpent Warren or Pit of Fangs. Changes wait until combat ends.
+- Add movable Surge Targets bars with player names, drop markers, ten-second countdowns, previews, and animated test controls.
+- Make 100% map and order scale match the previous 75% size, including the attached NSRT macro panel.
+- Default frame background opacity to 50%, preserving existing saved choices.
+- Add a Personal Warning Delay slider for 1-10 second display durations (4 seconds by default).
+- Add editable fight schedules for each difficulty, including Surge casts, intermissions, wind prompts, and resets. Raid Finder uses Normal defaults; newly observed events are saved. Changes apply next pull.
+
 ## 12.1.1
 
 - Share wind orders through manually clicked NSRT raid macros, with support for displaying restricted raid messages in Midnight.

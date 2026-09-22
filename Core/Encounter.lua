@@ -15,7 +15,6 @@ SH.modules.Encounter = SH.Encounter
 
 local SURGE_SPELL_ID = 1305959
 local HOWLING_SPELL_ID = 1285732
-local SURGE_WARNING_LEAD = 3
 local INITIAL_SURGE_DURATIONS = {[29] = true, [32] = true, [36] = true}
 local VARIABLE_EVENT_DURATIONS = {[47] = true, [52] = true, [59] = true}
 
@@ -64,22 +63,28 @@ function SH.Encounter:Start(encounterName, difficultyID)
     self.startedAt = GetTime()
     self.encounterName = encounterName
     self.difficultyID = difficultyID
+    -- Keep a consistent schedule for the entire pull; edits apply next pull.
+    self.timings = SH.Store:GetTimings(difficultyID)
     self.cycle = 1
     self.revision = 0
     self.assignments = {}
-    self.surgeIndex = 0
+    self.totalSurgeIndex = 0
+    self.intermissionIndex = 0
     SH.Comms.receivedCount = 0
     SH.Comms.receivedMarkers = {}
     self.variableTimelineStep = 0
     self.timelineEvents = {}
     self.seenTimelineEvents = {}
     self:CancelTimers()
+    SH.SurgeTargets:Reset()
+    self:ScheduleFight()
     SH.RoomMap:RefreshLayout()
     self:RefreshDisplays()
 end
 
 function SH.Encounter:Stop()
     self.active = false
+    SH.SurgeTargets:Reset()
     SH.PersonalWarning:Hide()
     SH.Comms.receivedCount = 0
     SH.Comms.receivedMarkers = {}
@@ -132,7 +137,6 @@ function SH.Encounter:ResetForNextPhase()
     SH.Comms.receivedMarkers = {}
     self.cycle = self.cycle + 1
     self.revision = 0
-    self.surgeIndex = 0
     SH.OrderFrame:Update(nil)
     self:RefreshDisplays()
 end
@@ -187,6 +191,7 @@ function SH.Encounter:RefreshDisplays()
     SH.NSRTMacros:RefreshVisibility()
     SH.PersonalWarning:SetUnlocked(unlocked)
     SH.PersonalWarning:RefreshVisibility()
+    SH.SurgeTargets:RefreshVisibility()
 end
 
 function SH.Encounter:SendWarning(text, isTest)
@@ -201,6 +206,7 @@ function SH.Encounter:SpeakWarning(text)
 end
 
 function SH.Encounter:WarnSurge(index, isTest)
+    if isTest then SH.SurgeTargets:ShowPreview(index, true) end
     if not isTest and not self.active then return end
     local options = SH.Store:Options()
     local showWarning = options.raidWarningSurges or isTest
@@ -246,6 +252,33 @@ function SH.Encounter:WarnPush(index, isTest)
     self:SpeakWarning("Push toward " .. SH.Const:MarkerName(markerID))
 end
 
+-- All configured times are elapsed seconds from ENCOUNTER_START.
+function SH.Encounter:ScheduleEvent(event)
+    local delay = event.time - (GetTime() - self.startedAt)
+    if event.kind == "surge" then
+        self.timers["targets:" .. event.id] = C_Timer.NewTimer(math.max(0, delay), function()
+            if SH.Encounter.active then SH.SurgeTargets:BeginCast(event.index) end
+        end)
+    end
+    if event.kind == "surge" then delay = delay - 3 end
+    self.timers["schedule:" .. event.id] = C_Timer.NewTimer(math.max(0, delay), function()
+        if not SH.Encounter.active then return end
+        if event.kind == "surge" then SH.Encounter:WarnSurge(event.index, false)
+        elseif event.kind == "intermission" then SH.RoomMap:StartRotation()
+        elseif event.kind == "wind" then SH.Encounter:WarnPush(event.index, false)
+        elseif event.kind == "rotationStop" then SH.RoomMap:StopRotation()
+        elseif event.kind == "phaseReset" then SH.Encounter:ResetForNextPhase() end
+    end)
+end
+
+function SH.Encounter:ScheduleFight()
+    self.scheduleByID = {}
+    for _, event in ipairs(self.timings) do
+        self.scheduleByID[event.id] = event
+        self:ScheduleEvent(event)
+    end
+end
+
 function SH.Encounter:OnTimelineAdded(eventInfo)
     if not self.active or not readable(eventInfo) or type(eventInfo) ~= "table" then return end
     if not readable(eventInfo.source) or eventInfo.source ~= 0 then return end
@@ -264,17 +297,28 @@ function SH.Encounter:OnTimelineAdded(eventInfo)
     end
 
     if sameSpellName(eventInfo.spellName, SURGE_SPELL_ID) or INITIAL_SURGE_DURATIONS[rounded] or variableSurge then
-        self.surgeIndex = (self.surgeIndex or 0) + 1
-        local index = ((self.surgeIndex - 1) % 2) + 1
-        self.timelineEvents[eventID] = {kind = "surge", index = index}
-        self.timers["surge" .. eventID] = C_Timer.NewTimer(math.max(0, duration - SURGE_WARNING_LEAD), function()
+        self.totalSurgeIndex = (self.totalSurgeIndex or 0) + 1
+        local index = (self.totalSurgeIndex - 1) % 2 + 1
+        local id = "surge" .. self.totalSurgeIndex
+        -- Known occurrences already have one timer from pull, even if edited later than the live cast.
+        if self.scheduleByID and self.scheduleByID[id] then return end
+        local event = {id = id, label = "Surge " .. self.totalSurgeIndex, kind = "surge", index = index,
+            time = GetTime() - self.startedAt + duration}
+        self.timelineEvents[eventID] = {kind = "surge", event = event}
+        self.timers["targets:live:" .. eventID] = C_Timer.NewTimer(math.max(0, duration), function()
+            if SH.Encounter.active then SH.SurgeTargets:BeginCast(index) end
+        end)
+        self.timers["surge" .. eventID] = C_Timer.NewTimer(math.max(0, duration - 3), function()
             if SH.Encounter.active then SH.Encounter:WarnSurge(index, false) end
         end)
         return
     end
 
     if sameSpellName(eventInfo.spellName, HOWLING_SPELL_ID) or rounded == 100 or rounded == 111 or rounded == 125 then
-        self.timelineEvents[eventID] = {kind = "digIn", started = false}
+        self.intermissionIndex = (self.intermissionIndex or 0) + 1
+        local id = "intermission" .. self.intermissionIndex
+        if self.scheduleByID and self.scheduleByID[id] then return end
+        self.timelineEvents[eventID] = {kind = "digIn", index = self.intermissionIndex, started = false}
     end
 end
 
@@ -285,25 +329,38 @@ function SH.Encounter:OnTimelineChanged(eventID)
     local ok, state = pcall(C_EncounterTimeline.GetEventState, eventID)
     if not ok or not readable(state) then return end
     if tracked.kind == "surge" and (state == 2 or state == 3) then
+        if state == 3 then
+            cancelTimer(self.timers["targets:live:" .. eventID])
+            self.timers["targets:live:" .. eventID] = nil
+        end
         cancelTimer(self.timers["surge" .. eventID])
         self.timers["surge" .. eventID] = nil
-    elseif tracked.kind == "digIn" and not tracked.started and (state == 2 or state == 3) then
+        if state == 2 and not tracked.finished then
+            tracked.finished = true
+            tracked.event.time = GetTime() - self.startedAt
+            SH.Store:RecordTiming(self.difficultyID, tracked.event)
+        end
+    elseif tracked.kind == "digIn" and not tracked.started and state == 2 then
         tracked.started = true
-        self:StartIntermission(false)
+        local elapsed = GetTime() - self.startedAt
+        for _, event in ipairs(SH.Const:IntermissionEvents(tracked.index, elapsed)) do
+            SH.Store:RecordTiming(self.difficultyID, event)
+            self:ScheduleEvent(event)
+        end
     end
 end
 
 function SH.Encounter:StartIntermission(isTest)
+    -- Manual test starts now; fight timers use the absolute schedule above.
+    for _, key in ipairs({"push1", "push2", "push3", "rotationStop", "phaseReset"}) do
+        cancelTimer(self.timers[key])
+        self.timers[key] = nil
+    end
     SH.RoomMap:StartRotation()
     self:WarnPush(1, isTest)
     self.timers.push2 = C_Timer.NewTimer(8, function() SH.Encounter:WarnPush(2, isTest) end)
     self.timers.push3 = C_Timer.NewTimer(18, function() SH.Encounter:WarnPush(3, isTest) end)
     self.timers.rotationStop = C_Timer.NewTimer(25, function() SH.RoomMap:StopRotation() end)
-    if not isTest then
-        self.timers.phaseReset = C_Timer.NewTimer(30, function()
-            if SH.Encounter.active then SH.Encounter:ResetForNextPhase() end
-        end)
-    end
 end
 
 function SH.Encounter:EnterTestMode()
@@ -321,9 +378,6 @@ end
 
 function SH.Encounter:TestIntermission()
     if not self.testMode then return end
-    cancelTimer(self.timers.push2)
-    cancelTimer(self.timers.push3)
-    cancelTimer(self.timers.rotationStop)
     self:StartIntermission(true)
 end
 

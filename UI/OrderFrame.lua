@@ -6,7 +6,7 @@ SH.modules.OrderFrame = SH.OrderFrame
 function SH.OrderFrame:OnInitialize()
     local frame = CreateFrame("Frame", "SszorakHelperOrderFrame", UIParent, "BackdropTemplate")
     frame:SetSize(266, 88)
-    frame:SetScale(SH.Store:Options().orderFrameScale or 1)
+    frame:SetScale((SH.Store:Options().orderFrameScale or 1) * SH.Const.FRAME_SCALE_BASE)
     frame:SetFrameStrata("MEDIUM")
     frame:Hide()
     SH.Widgets:ApplyBackdrop(frame, SH.Widgets.colors.canvas, SH.Widgets.colors.borderStrong)
@@ -39,11 +39,11 @@ function SH.OrderFrame:OnInitialize()
 end
 
 function SH.OrderFrame:ApplyScale()
-    self.frame:SetScale(SH.Store:Options().orderFrameScale or 1)
+    self.frame:SetScale((SH.Store:Options().orderFrameScale or 1) * SH.Const.FRAME_SCALE_BASE)
 end
 
 function SH.OrderFrame:ApplyBackgroundOpacity()
-    local opacity = math.max(0, math.min(1, tonumber(SH.Store:Options().frameBackgroundOpacity) or 1))
+    local opacity = math.max(0, math.min(1, tonumber(SH.Store:Options().frameBackgroundOpacity) or 0.5))
     self.frame:SetBackdropColor(0.035, 0.064, 0.084, opacity)
 end
 

@@ -176,6 +176,6 @@ function SH.Widgets:MakeMovable(frame, stateKey, handle)
     dragHandle:SetScript("OnDragStop", function()
         frame:StopMovingOrSizing()
         SH.Store:SaveFrame(stateKey, frame)
-        if stateKey == "roomMap" and SH.NSRTMacros then SH.NSRTMacros:ApplySecurePosition() end
+        if (stateKey == "roomMap" or stateKey == "nsrtMacros") and SH.NSRTMacros then SH.NSRTMacros:ApplySecurePosition() end
     end)
 end

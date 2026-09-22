@@ -33,6 +33,7 @@ end
 local function addToggle(parent, label, x, y, getter, setter)
     local cell = optionCell(parent, x, y, CELL_WIDTH)
     local text = cellLabel(cell, label)
+    cell.label = text
     text:SetWidth(CELL_WIDTH - 82)
     local check = SH.Widgets:Check(cell, "", function(value)
         setter(value)
@@ -80,6 +81,7 @@ local function addOpacityControl(parent, x, y, options)
             SH.RoomMap:ApplyBackgroundOpacity()
             SH.OrderFrame:ApplyBackgroundOpacity()
             SH.NSRTMacros:ApplyBackgroundOpacity()
+            SH.SurgeTargets:ApplyBackgroundOpacity()
             UI:RefreshOpacityControl()
         end, "secondary")
         button:SetPoint("RIGHT", -12 - ((#OPACITY_VALUES - index) * 62), 0)
@@ -92,7 +94,7 @@ function UI:Ensure()
     if self.frame then return end
 
     local frame = CreateFrame("Frame", "SszorakHelperOptionsFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(900, 926)
+    frame:SetSize(930, 926)
     frame:SetFrameStrata("FULLSCREEN_DIALOG")
     frame:SetToplevel(true)
     frame:SetClampedToScreen(true)
@@ -140,7 +142,7 @@ function UI:Ensure()
     resetLayout.tooltip = "Restore the currently selected layout to Sszorak Helper's original marker arrangement."
     resetLayout._shEnabledStyle = "secondary"
 
-    local note = SH.Widgets:Label(nav, "Turn off Lock Frames, then drag the room map, wind order frame, or personal warning. The NSRT macros follow the room map.")
+    local note = SH.Widgets:Label(nav, "Use Preview Frames and turn off Lock Frames to position displays. Turn off Attach to Map to drag NSRT macros separately.")
     note:SetPoint("TOPLEFT", 18, -278)
     note:SetWidth(134)
     note:SetWordWrap(true)
@@ -148,9 +150,12 @@ function UI:Ensure()
     local close = SH.Widgets:Button(nav, "Close", 134, 30, function() frame:Hide() end, "secondary")
     close:SetPoint("BOTTOMLEFT", 18, 18)
 
-    local content = CreateFrame("Frame", nil, frame)
-    content:SetPoint("TOPLEFT", nav, "TOPRIGHT", 0, 0)
-    content:SetPoint("BOTTOMRIGHT")
+    local scroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", nav, "TOPRIGHT", 0, 0)
+    scroll:SetPoint("BOTTOMRIGHT", -28, 16)
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetSize(730, 1030)
+    scroll:SetScrollChild(content)
 
     local header = SH.Widgets:Text(content, "Configuration", true)
     header:SetPoint("TOPLEFT", 24, -20)
@@ -169,10 +174,7 @@ function UI:Ensure()
     addToggle(frameSection, "Lock Frames", CELL_RIGHT, -34, function() return options.lockFrames end, function(v) options.lockFrames = v end)
     addToggle(frameSection, "Room Mini Map", CELL_LEFT, -68, function() return options.showRoomMap end, function(v) options.showRoomMap = v end)
     addToggle(frameSection, "Wind Drop Order Frame", CELL_RIGHT, -68, function() return options.showOrderFrame end, function(v) options.showOrderFrame = v end)
-    addToggle(frameSection, "NSRT Macro Buttons", CELL_LEFT, -102, function() return options.showNSRTMacros end, function(v)
-        options.showNSRTMacros = v
-        if UI.createMacrosButton then UI.createMacrosButton:SetShown(v) end
-    end)
+    addToggle(frameSection, "Surge Targets", CELL_LEFT, -102, function() return options.showSurgeTargets end, function(v) options.showSurgeTargets = v end)
     addToggle(frameSection, "Show Clear Button", CELL_RIGHT, -102, function() return options.showClearButton end, function(v) options.showClearButton = v end)
     addScaleControl(frameSection, "Map Scale", CELL_LEFT, -136, function() return options.roomMapScale end, function(v)
         options.roomMapScale = v
@@ -185,22 +187,39 @@ function UI:Ensure()
     end)
     addOpacityControl(frameSection, CELL_LEFT, -170, options)
 
-    local createMacros = SH.Widgets:Button(frameSection, "Create NSRT Macros", 174, 24, function()
+    local macros = makeSection(content, "NSRT Macro Buttons", -294, 106)
+    addToggle(macros, "NSRT Macro Buttons", CELL_LEFT, -34, function() return options.showNSRTMacros end, function(v)
+        options.showNSRTMacros = v
+        if v then
+            SH.NSRTMacros.inRoom = nil
+            SH.NSRTMacros:OnZoneChanged()
+        end
+    end)
+    addToggle(macros, "Attach to Map", CELL_LEFT, -68, function() return options.nsrtAttachToMap end, function(v)
+        options.nsrtAttachToMap = v
+        SH.NSRTMacros:ApplyAttachment()
+    end)
+    addToggle(macros, "Auto Show / Hide by Room", CELL_RIGHT, -68, function() return options.nsrtAutoShow end, function(v)
+        options.nsrtAutoShow = v
+        SH.NSRTMacros.inRoom = nil
+        SH.NSRTMacros.lastSubzone = nil
+        SH.NSRTMacros:OnZoneChanged()
+    end)
+    local createMacros = SH.Widgets:Button(macros, "Create NSRT Macros", 174, 24, function()
         SH.NSRTMacros:CreateOrRepairMacros()
     end, "primary")
-    createMacros:SetPoint("TOPRIGHT", -4, -3)
-    createMacros:SetShown(options.showNSRTMacros)
+    createMacros:SetPoint("TOPRIGHT", -12, -38)
     createMacros.tooltip = "Creates or repairs NSRT_SSZORAK_1 through NSRT_SSZORAK_8 using NorthernSky's matching icons and /raid messages. This overwrites macros already using those reserved names."
     self.createMacrosButton = createMacros
 
-    local intermission = makeSection(content, "Intermission Options", -294, 70)
+    local intermission = makeSection(content, "Intermission Options", -408, 70)
     addToggle(intermission, "Rotate Mini Map", CELL_LEFT, -34, function() return options.rotateMap end, function(v)
         options.rotateMap = v
         if not v then SH.RoomMap:StopRotation() end
     end)
     addToggle(intermission, "Show Push Direction Warning", CELL_RIGHT, -34, function() return options.raidWarningPushes end, function(v) options.raidWarningPushes = v end)
 
-    local other = makeSection(content, "Personal Warnings / NSRT", -372, 138)
+    local other = makeSection(content, "Personal Warnings / NSRT", -486, 138)
     addToggle(other, "Show Drop Location Warning", CELL_LEFT, -34, function() return options.raidWarningSurges end, function(v) options.raidWarningSurges = v end)
     addToggle(other, "TTS Warnings", CELL_RIGHT, -34, function() return options.ttsWarnings end, function(v) options.ttsWarnings = v end)
     local fontCell = optionCell(other, CELL_LEFT, -68, CELL_WIDTH)
@@ -217,17 +236,36 @@ function UI:Ensure()
         SH.Comms.receivedCount = 0
         SH.Comms.receivedMarkers = {}
     end)
-    local difficulty = makeSection(content, "Enabled Difficulties", -518, 104)
+    local delayCell = optionCell(other, CELL_LEFT, -102, FULL_CELL_WIDTH)
+    self.warningDelayLabel = cellLabel(delayCell, "")
+    self.warningDelayLabel:SetWidth(330)
+    self.warningDelaySlider = SH.Widgets:Slider(delayCell, 280, 1, 10, 0.5, function(value, userInput)
+        options.personalWarningDelay = math.floor(value * 2 + 0.5) / 2
+        UI.warningDelayLabel:SetText(string.format("Personal Warning Delay: %g s", options.personalWarningDelay))
+        if userInput then SH.PersonalWarning:Show("%s", "Personal warning preview") end
+    end)
+    self.warningDelaySlider:SetPoint("RIGHT", -12, 0)
+    local difficulty = makeSection(content, "Enabled Difficulties", -632, 104)
+    self.difficultyGearButtons = {}
     for index, definition in ipairs(SH.Const.DIFFICULTIES) do
         local difficultyID = definition.id
         local column = (index - 1) % 2
         local row = math.floor((index - 1) / 2)
-        addToggle(difficulty, definition.name, column == 0 and CELL_LEFT or CELL_RIGHT, -34 - (row * 34),
+        local cell = addToggle(difficulty, definition.name, column == 0 and CELL_LEFT or CELL_RIGHT, -34 - (row * 34),
             function() return options.difficulties[difficultyID] == true end,
             function(v) options.difficulties[difficultyID] = v end)
+        cell.label:SetWidth(CELL_WIDTH - 112)
+        local gear = SH.Widgets:Button(cell, "", 26, 26, function() UI:ShowTimingDialog(difficultyID) end, "secondary")
+        gear:SetPoint("RIGHT", -62, 0)
+        gear.icon = gear:CreateTexture(nil, "ARTWORK")
+        gear.icon:SetSize(20, 20)
+        gear.icon:SetPoint("CENTER")
+        gear.icon:SetTexture("Interface\\Buttons\\UI-OptionsButton")
+        gear.tooltip = "Adjust " .. definition.name .. " surge, intermission, and wind timings."
+        self.difficultyGearButtons[difficultyID] = gear
     end
 
-    local layoutSection = makeSection(content, "Marker Layout", -630, 280)
+    local layoutSection = makeSection(content, "Marker Layout", -744, 280)
     local layoutHint = SH.Widgets:Label(layoutSection, "Choose New to edit. Click two positions to swap their markers.")
     layoutHint:SetPoint("TOPLEFT", 10, -38)
     layoutHint:SetWidth(450)
@@ -317,6 +355,133 @@ function UI:Ensure()
     self.resetLayoutButton = resetLayout
     self.testButton = test
     self.topCloseButton = topClose
+end
+
+function UI:EnsureTimingDialog()
+    if self.timingDialog then return end
+    local shade = CreateFrame("Frame", nil, self.frame, "BackdropTemplate")
+    shade:SetAllPoints(self.frame)
+    shade:SetFrameLevel(self.frame:GetFrameLevel() + 50)
+    shade:EnableMouse(true)
+    shade:Hide()
+    SH.Widgets:ApplyBackdrop(shade, SH.Widgets.colors.overlay, SH.Widgets.colors.transparent)
+
+    local panel = CreateFrame("Frame", nil, shade, "BackdropTemplate")
+    panel:SetSize(660, 610)
+    panel:SetPoint("CENTER")
+    SH.Widgets:ApplyBackdrop(panel, SH.Widgets.colors.canvasAlt, SH.Widgets.colors.borderStrong)
+    panel.title = SH.Widgets:Text(panel, "Encounter timings", true)
+    panel.title:SetPoint("TOPLEFT", 20, -18)
+    local hint = SH.Widgets:Label(panel, "Event times from the pull. Enter minutes:seconds or seconds. Surge warnings appear 3 seconds before the listed cast. Save applies next pull.")
+    hint:SetPoint("TOPLEFT", 20, -50)
+    hint:SetWidth(620)
+    hint:SetWordWrap(true)
+    panel.source = SH.Widgets:Label(panel, "")
+    panel.source:SetPoint("TOPLEFT", 20, -103)
+    panel.source:SetWidth(620)
+    panel.source:SetWordWrap(true)
+    local eventHeading = SH.Widgets:Text(panel, "EVENT")
+    eventHeading:SetPoint("TOPLEFT", 26, -144)
+    local timeHeading = SH.Widgets:Text(panel, "TIME FROM PULL")
+    timeHeading:SetPoint("TOPRIGHT", -58, -144)
+
+    local scroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", 20, -169)
+    scroll:SetPoint("BOTTOMRIGHT", -44, 108)
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetSize(594, 1)
+    scroll:SetScrollChild(content)
+    panel.scroll, panel.content = scroll, content
+    panel.rows, panel.edits = {}, {}
+    panel.empty = SH.Widgets:Label(content, "No stored events for this difficulty.")
+    panel.empty:SetPoint("TOPLEFT", 6, -12)
+    panel.empty:SetWidth(570)
+    panel.empty:SetWordWrap(true)
+    panel.empty:Hide()
+    panel.error = SH.Widgets:Label(panel, "")
+    panel.error:SetPoint("BOTTOMLEFT", 20, 62)
+    panel.error:SetWidth(620)
+    panel.error:SetWordWrap(true)
+    panel.error:SetTextColor(unpack(SH.Widgets.colors.dangerBorder))
+    local reset = SH.Widgets:Button(panel, "Reset Defaults", 132, 30, function()
+        UI:FillTimingDialog(SH.Store:GetTimings(shade.difficultyID, true))
+    end, "secondary")
+    reset:SetPoint("BOTTOMLEFT", 20, 20)
+    local cancel = SH.Widgets:Button(panel, "Cancel", 100, 30, function() shade:Hide() end, "secondary")
+    cancel:SetPoint("BOTTOMRIGHT", -132, 20)
+    local save = SH.Widgets:Button(panel, "Save", 100, 30, function() UI:SubmitTimings() end, "success")
+    save:SetPoint("BOTTOMRIGHT", -20, 20)
+    panel.save = save
+    shade.panel = panel
+    self.timingDialog = shade
+end
+
+function UI:FillTimingDialog(events)
+    local dialog = self.timingDialog
+    local panel = dialog.panel
+    panel.events, panel.edits = events, {}
+    for _, row in ipairs(panel.rows) do row:Hide() end
+    for index, event in ipairs(events) do
+        local row = panel.rows[index]
+        if not row then
+            row = optionCell(panel.content, 0, -(index - 1) * 36, 590)
+            row.label = cellLabel(row, "")
+            row.label:SetWidth(380)
+            row.edit = CreateFrame("EditBox", nil, row, "BackdropTemplate")
+            row.edit:SetSize(142, 28)
+            row.edit:SetPoint("RIGHT", -6, 0)
+            row.edit:SetFontObject(ChatFontNormal)
+            row.edit:SetTextInsets(9, 9, 0, 0)
+            row.edit:SetMaxLetters(10)
+            row.edit:SetAutoFocus(false)
+            row.edit:SetScript("OnEscapePressed", function() dialog:Hide() end)
+            row.edit:SetScript("OnEnterPressed", function() UI:SubmitTimings() end)
+            local rowIndex = index
+            row.edit:SetScript("OnTabPressed", function()
+                local nextIndex = rowIndex % #panel.events + 1
+                local nextEdit = panel.rows[nextIndex].edit
+                panel.scroll:SetVerticalScroll(math.max(0, (nextIndex - 2) * 36))
+                nextEdit:SetFocus()
+                nextEdit:HighlightText()
+            end)
+            SH.Widgets:ApplyBackdrop(row.edit, SH.Widgets.colors.control, SH.Widgets.colors.border)
+            panel.rows[index] = row
+        end
+        row.label:SetText(event.label)
+        row.edit:SetText(SH.Const:FormatFightTime(event.time))
+        panel.edits[event.id] = row.edit
+        row:Show()
+    end
+    panel.content:SetHeight(math.max(100, #events * 36))
+    panel.scroll:SetVerticalScroll(0)
+    panel.empty:SetShown(#events == 0)
+    SH.Widgets:SetEnabled(panel.save, #events > 0)
+    panel.error:SetText("")
+end
+
+function UI:ShowTimingDialog(difficultyID)
+    self:EnsureTimingDialog()
+    local dialog = self.timingDialog
+    dialog.difficultyID = difficultyID
+    for _, definition in ipairs(SH.Const.DIFFICULTIES) do
+        if definition.id == difficultyID then dialog.panel.title:SetText(definition.name .. " Fight Schedule") end
+    end
+    dialog.panel.source:SetText(difficultyID == 17
+        and "Raid Finder defaults to Normal's schedule. Saved adjustments apply only to Raid Finder."
+        or "Default cast times: NSRT. Wind prompts and intermission end times use this addon's existing timing defaults.")
+    self:FillTimingDialog(SH.Store:GetTimings(difficultyID))
+    dialog:Show()
+end
+
+function UI:SubmitTimings()
+    local dialog = self.timingDialog
+    local values = {}
+    for _, event in ipairs(dialog.panel.events) do
+        values[event.id] = dialog.panel.edits[event.id]:GetText()
+    end
+    local ok, reason = SH.Store:SaveTimings(dialog.difficultyID, values)
+    if not ok then dialog.panel.error:SetText(reason); return end
+    dialog:Hide()
 end
 
 local function abbreviatedProfileName(name)
@@ -517,7 +682,7 @@ end
 
 function UI:RefreshOpacityControl()
     if not self.opacityButtons then return end
-    local selected = tonumber(SH.Store:Options().frameBackgroundOpacity) or 1
+    local selected = tonumber(SH.Store:Options().frameBackgroundOpacity) or 0.5
     for index, button in ipairs(self.opacityButtons) do
         SH.Widgets:StyleButton(button, math.abs(OPACITY_VALUES[index] - selected) < 0.01 and "primary" or "secondary")
     end
@@ -547,8 +712,12 @@ function UI:Refresh()
     self.warningFontSlider:SetValue(SH.Store:Options().personalWarningFontSize)
     self.warningFontSlider._shUpdating = false
     self.warningFontLabel:SetText(string.format("Warning Font: %d px", SH.Store:Options().personalWarningFontSize))
+    local warningDelay = SH.Store:GetPersonalWarningDelay()
+    self.warningDelaySlider._shUpdating = true
+    self.warningDelaySlider:SetValue(warningDelay)
+    self.warningDelaySlider._shUpdating = false
+    self.warningDelayLabel:SetText(string.format("Personal Warning Delay: %g s", warningDelay))
     for _, entry in ipairs(self.optionChecks) do entry.check:SetChecked(entry.getter()) end
-    if self.createMacrosButton then self.createMacrosButton:SetShown(SH.Store:Options().showNSRTMacros) end
     for _, entry in ipairs(self.scaleControls) do
         local value = tonumber(entry.getter()) or 1
         entry.slider._shUpdating = true

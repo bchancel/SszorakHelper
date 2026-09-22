@@ -16,7 +16,7 @@ end
 function SH.RoomMap:OnInitialize()
     local frame = CreateFrame("Frame", "SszorakHelperRoomMap", UIParent, "BackdropTemplate")
     frame:SetSize(348, 348)
-    frame:SetScale(SH.Store:Options().roomMapScale or 1)
+    frame:SetScale((SH.Store:Options().roomMapScale or 1) * SH.Const.FRAME_SCALE_BASE)
     frame:SetFrameStrata("MEDIUM")
     frame:SetClampedToScreen(true)
     frame:Hide()
@@ -101,11 +101,11 @@ function SH.RoomMap:OnInitialize()
 end
 
 function SH.RoomMap:ApplyScale()
-    self.frame:SetScale(SH.Store:Options().roomMapScale or 1)
+    self.frame:SetScale((SH.Store:Options().roomMapScale or 1) * SH.Const.FRAME_SCALE_BASE)
 end
 
 function SH.RoomMap:ApplyBackgroundOpacity()
-    local opacity = math.max(0, math.min(1, tonumber(SH.Store:Options().frameBackgroundOpacity) or 1))
+    local opacity = math.max(0, math.min(1, tonumber(SH.Store:Options().frameBackgroundOpacity) or 0.5))
     self.frame:SetBackdropColor(0.035, 0.064, 0.084, opacity)
     self.frame.circle:SetVertexColor(0.025, 0.05, 0.065, 0)
 end

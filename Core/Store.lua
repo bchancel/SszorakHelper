@@ -13,17 +13,24 @@ local defaults = {
         showOrderFrame = true,
         showNSRTMacros = true,
         nsrtPanelOpen = false,
+        nsrtAttachToMap = true,
+        nsrtAutoShow = false,
+        showSurgeTargets = false,
         receiveNSRT = true,
         previewFrames = false,
         lockFrames = true,
         roomMapScale = 1,
         orderFrameScale = 1,
-        frameBackgroundOpacity = 1,
+        frameBackgroundOpacity = 0.5,
         minimapAngle = 220,
         rotateMap = true,
         raidWarningSurges = true,
         raidWarningPushes = false,
         personalWarningFontSize = 32,
+        personalWarningDelay = 4,
+        -- Separate schema: old warning-delay settings are not elapsed timestamps.
+        encounterSchedules = {},
+        observedSchedules = {},
         ttsWarnings = false,
         showClearButton = false,
         difficulties = {[17] = true, [14] = true, [15] = true, [16] = true},
@@ -38,6 +45,8 @@ local defaults = {
     frames = {
         roomMap = {point = "CENTER", relativePoint = "CENTER", x = -360, y = 20},
         order = {point = "CENTER", relativePoint = "CENTER", x = 0, y = 260},
+        nsrtMacros = {point = "CENTER", relativePoint = "CENTER", x = -360, y = -200},
+        surgeTargets = {point = "CENTER", relativePoint = "CENTER", x = 300, y = 160},
         personalWarning = {point = "CENTER", relativePoint = "CENTER", x = 0, y = 180},
         options = {point = "CENTER", relativePoint = "CENTER", x = 0, y = 0},
         test = {point = "CENTER", relativePoint = "CENTER", x = 360, y = 20},
@@ -147,6 +156,62 @@ end
 
 function SH.Store:Options()
     return self.db.options
+end
+
+function SH.Store:GetPersonalWarningDelay()
+    local value = tonumber(self:Options().personalWarningDelay) or 4
+    if value ~= value then value = 4 end
+    return math.max(1, math.min(10, value))
+end
+
+function SH.Store:GetTimings(difficultyID, defaultsOnly)
+    difficultyID = tonumber(difficultyID)
+    local events = SH.Const:DefaultSchedule(difficultyID)
+    local seen = {}
+    for _, event in ipairs(events) do seen[event.id] = true end
+    -- Keep observed occurrences that are missing from the published schedule.
+    for _, event in ipairs(self:Options().observedSchedules[difficultyID] or {}) do
+        if not seen[event.id] then events[#events + 1] = copy(event) end
+    end
+    SH.Const:SortSchedule(events)
+    local saved = not defaultsOnly and self:Options().encounterSchedules[difficultyID]
+    for _, event in ipairs(events) do
+        event.defaultTime = event.time
+        local value = type(saved) == "table" and tonumber(saved[event.id])
+        if value and value == value and value >= 0 and value <= 1800 then event.time = value end
+    end
+    return events
+end
+
+function SH.Store:SaveTimings(difficultyID, values)
+    local supported = false
+    for _, definition in ipairs(SH.Const.DIFFICULTIES) do
+        if definition.id == difficultyID then supported = true; break end
+    end
+    if not supported then return false, "Choose a supported raid difficulty." end
+    local validated, previous = {}, -1
+    for _, event in ipairs(self:GetTimings(difficultyID, true)) do
+        local value = SH.Const:ParseFightTime(values[event.id])
+        if not value or value ~= value or value < 0 or value > 1800 then
+            return false, event.label .. ": enter 0:00 to 30:00, or seconds."
+        end
+        value = math.floor(value * 100 + 0.5) / 100
+        if value < previous then return false, event.label .. " must not occur before the previous event." end
+        previous = value
+        validated[event.id] = value
+    end
+    self:Options().encounterSchedules[difficultyID] = validated
+    return true
+end
+
+function SH.Store:RecordTiming(difficultyID, event)
+    if not event.time or event.time < 0 or event.time > 1800 then return end
+    local schedules = self:Options().observedSchedules
+    schedules[difficultyID] = schedules[difficultyID] or {}
+    for index, saved in ipairs(schedules[difficultyID]) do
+        if saved.id == event.id then schedules[difficultyID][index] = copy(event); return end
+    end
+    schedules[difficultyID][#schedules[difficultyID] + 1] = copy(event)
 end
 
 function SH.Store:GetLayout()

@@ -47,11 +47,41 @@ function SH.NSRTMacros:ShouldShow()
         or (options.nsrtPanelOpen and self:IsSupportedInstance()))
 end
 
+function SH.NSRTMacros:OnZoneChanged()
+    local options = SH.Store:Options()
+    local supported = self:IsSupportedInstance()
+    local subzone = GetSubZoneText()
+    local inRoom = supported and subzone == "Altar of the Six Winds"
+    local outsideRoom = supported and (subzone == "The Serpent Warren" or subzone == "Pit of Fangs")
+    if options.nsrtAutoShow and options.showNSRTMacros then
+        -- Manual visibility lasts until the next room entry. Only recognized rooms auto-hide.
+        if inRoom and not self.inRoom then
+            self.pendingAutoVisibility = true
+        elseif outsideRoom and subzone ~= self.lastSubzone then
+            self.pendingAutoVisibility = false
+        elseif not inRoom and not outsideRoom then
+            self.pendingAutoVisibility = nil
+        end
+    else
+        self.pendingAutoVisibility = nil
+    end
+    self.inRoom = inRoom
+    self.lastSubzone = subzone
+    if self.pendingAutoVisibility ~= nil and not InCombatLockdown() then
+        options.nsrtPanelOpen = self.pendingAutoVisibility
+        self.pendingAutoVisibility = nil
+        -- Automatic hiding affects the live panel; explicit Preview/Test Mode still works.
+        self.panelHidden = false
+    end
+    self:RefreshVisibility()
+end
+
 function SH.NSRTMacros:TogglePanel()
     self:SetPanelOpen(not self:ShouldShow())
 end
 
 function SH.NSRTMacros:SetPanelOpen(open)
+    self.pendingAutoVisibility = nil
     local options = SH.Store:Options()
     options.nsrtPanelOpen = open and true or false
     self.panelHidden = not options.nsrtPanelOpen
@@ -110,7 +140,7 @@ function SH.NSRTMacros:OnInitialize()
     frame:SetClampedToScreen(true)
     frame:Hide()
     SH.Widgets:ApplyBackdrop(frame, SH.Widgets.colors.canvas, SH.Widgets.colors.borderStrong)
-    frame:SetPoint("TOP", SH.RoomMap.frame, "BOTTOM", 0, 0)
+    SH.Widgets:MakeMovable(frame, "nsrtMacros", frame)
 
     frame.title = SH.Widgets:Label(frame, "NSRT MACROS")
     frame.title:SetPoint("TOPLEFT", 10, -7)
@@ -181,6 +211,7 @@ function SH.NSRTMacros:OnInitialize()
 
     self.secureFrame = secure
     self.frame = frame
+    self:ApplyAttachment()
     self:ApplyScale()
     self:ApplySecurePosition()
     self:ApplyBackgroundOpacity()
@@ -188,8 +219,9 @@ function SH.NSRTMacros:OnInitialize()
     self:RefreshHighlights()
     self:RefreshVisibility()
 
-    SH:RegisterEvent("PLAYER_ENTERING_WORLD", function() SH.NSRTMacros:RefreshVisibility() end)
-    SH:RegisterEvent("ZONE_CHANGED_NEW_AREA", function() SH.NSRTMacros:RefreshVisibility() end)
+    for _, event in ipairs({"PLAYER_ENTERING_WORLD", "ZONE_CHANGED_NEW_AREA", "ZONE_CHANGED", "ZONE_CHANGED_INDOORS"}) do
+        SH:RegisterEvent(event, function() SH.NSRTMacros:OnZoneChanged() end)
+    end
     SH:RegisterEvent("UPDATE_MACROS", function() SH.NSRTMacros:RefreshLayout() end)
     SH:RegisterEvent("GROUP_ROSTER_UPDATE", function()
         SH.NSRTMacros:RefreshLayout()
@@ -197,10 +229,26 @@ function SH.NSRTMacros:OnInitialize()
     end)
     SH:RegisterEvent("PLAYER_REGEN_ENABLED", function()
         SH.NSRTMacros:RefreshLayout()
-        SH.NSRTMacros:ApplySecurePosition()
+        SH.NSRTMacros:ApplyAttachment()
         SH.NSRTMacros:ApplyScale()
-        SH.NSRTMacros:RefreshVisibility()
+        SH.NSRTMacros:OnZoneChanged()
     end)
+end
+
+function SH.NSRTMacros:ApplyAttachment()
+    if not self.frame or InCombatLockdown() then return end
+    local attached = SH.Store:Options().nsrtAttachToMap
+    if self.attached ~= attached then
+        self.frame:ClearAllPoints()
+        if attached then
+            self.frame:SetPoint("TOP", SH.RoomMap.frame, "BOTTOM", 0, 0)
+        else
+            SH.Store:ApplyFrame("nsrtMacros", self.frame)
+        end
+        self.attached = attached
+    end
+    self:SetUnlocked(not SH.Store:Options().lockFrames)
+    self:ApplySecurePosition()
 end
 
 function SH.NSRTMacros:ApplySecurePosition()
@@ -217,7 +265,7 @@ end
 
 function SH.NSRTMacros:ApplyScale()
     if not self.frame then return end
-    local scale = SH.Store:Options().roomMapScale or 1
+    local scale = (SH.Store:Options().roomMapScale or 1) * SH.Const.FRAME_SCALE_BASE
     if InCombatLockdown() then
         self.pendingSecureRefresh = true
         return
@@ -236,12 +284,13 @@ end
 
 function SH.NSRTMacros:ApplyBackgroundOpacity()
     if not self.frame then return end
-    local opacity = math.max(0, math.min(1, tonumber(SH.Store:Options().frameBackgroundOpacity) or 1))
+    local opacity = math.max(0, math.min(1, tonumber(SH.Store:Options().frameBackgroundOpacity) or 0.5))
     self.frame:SetBackdropColor(0.035, 0.064, 0.084, opacity)
 end
 
 function SH.NSRTMacros:SetUnlocked(unlocked)
     if not self.frame then return end
+    unlocked = unlocked and not SH.Store:Options().nsrtAttachToMap
     self.frame._shUnlocked = unlocked and true or false
     self.frame:SetBackdropBorderColor(unpack(unlocked and SH.Widgets.colors.accentBright or SH.Widgets.colors.borderStrong))
 end
@@ -345,6 +394,7 @@ function SH.NSRTMacros:RefreshVisibility()
         self.frame:SetShown(self.secureFrame:IsShown())
         return
     end
+    self:ApplyAttachment()
     self.frame:SetShown(shouldShow)
     self.secureFrame:SetShown(shouldShow)
     if shouldShow then
