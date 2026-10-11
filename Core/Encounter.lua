@@ -91,7 +91,6 @@ function SH.Encounter:Stop()
     self:CancelTimers()
     self.timelineEvents = {}
     self.seenTimelineEvents = {}
-    SH.RoomMap:StopRotation()
     self:RefreshDisplays()
 end
 
@@ -253,6 +252,8 @@ end
 
 -- All configured times are elapsed seconds from ENCOUNTER_START.
 function SH.Encounter:ScheduleEvent(event)
+    -- Intermission starts remain editable reference times for the wind prompts.
+    if event.kind == "intermission" then return end
     local delay = event.time - (GetTime() - self.startedAt)
     if event.kind == "surge" then
         self.timers["targets:" .. event.id] = C_Timer.NewTimer(math.max(0, delay), function()
@@ -263,9 +264,7 @@ function SH.Encounter:ScheduleEvent(event)
     self.timers["schedule:" .. event.id] = C_Timer.NewTimer(math.max(0, delay), function()
         if not SH.Encounter.active then return end
         if event.kind == "surge" then SH.Encounter:WarnSurge(event.index, false)
-        elseif event.kind == "intermission" then SH.RoomMap:StartRotation()
         elseif event.kind == "wind" then SH.Encounter:WarnPush(event.index, false)
-        elseif event.kind == "rotationStop" then SH.RoomMap:StopRotation()
         elseif event.kind == "phaseReset" then SH.Encounter:ResetForNextPhase() end
     end)
 end
@@ -351,15 +350,13 @@ end
 
 function SH.Encounter:StartIntermission(isTest)
     -- Manual test starts now; fight timers use the absolute schedule above.
-    for _, key in ipairs({"push1", "push2", "push3", "rotationStop", "phaseReset"}) do
+    for _, key in ipairs({"push1", "push2", "push3", "phaseReset"}) do
         cancelTimer(self.timers[key])
         self.timers[key] = nil
     end
-    SH.RoomMap:StartRotation()
     self:WarnPush(1, isTest)
     self.timers.push2 = C_Timer.NewTimer(8, function() SH.Encounter:WarnPush(2, isTest) end)
     self.timers.push3 = C_Timer.NewTimer(18, function() SH.Encounter:WarnPush(3, isTest) end)
-    self.timers.rotationStop = C_Timer.NewTimer(25, function() SH.RoomMap:StopRotation() end)
 end
 
 function SH.Encounter:EnterTestMode()
@@ -385,7 +382,6 @@ function SH.Encounter:QuitTestMode()
     SH.PersonalWarning:Hide()
     self.testMode = false
     self.assignments = {}
-    SH.RoomMap:StopRotation()
     self:RefreshDisplays()
     if SH.OptionsUI and SH.OptionsUI.testFrame then SH.OptionsUI.testFrame:Hide() end
     return true

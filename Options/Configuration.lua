@@ -150,26 +150,31 @@ function UI:Ensure()
     local close = SH.Widgets:Button(nav, "Close", 134, 30, function() frame:Hide() end, "secondary")
     close:SetPoint("BOTTOMLEFT", 18, 18)
 
-    local scroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", nav, "TOPRIGHT", 0, 0)
-    scroll:SetPoint("BOTTOMRIGHT", -28, 16)
-    local content = CreateFrame("Frame", nil, scroll)
-    content:SetSize(730, 1030)
-    scroll:SetScrollChild(content)
-
-    local header = SH.Widgets:Text(content, "Configuration", true)
-    header:SetPoint("TOPLEFT", 24, -20)
-    local hint = SH.Widgets:Label(content, "Account-wide encounter, warning, layout, and frame settings.")
-    hint:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -7)
+    local header = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+    header:SetPoint("TOPLEFT", nav, "TOPRIGHT", 0, 0)
+    header:SetPoint("TOPRIGHT", -1, -1)
+    header:SetHeight(72)
+    SH.Widgets:ApplyBackdrop(header, SH.Widgets.colors.canvas, SH.Widgets.colors.transparent)
+    header.title = SH.Widgets:Text(header, "Configuration", true)
+    header.title:SetPoint("TOPLEFT", 24, -20)
+    local hint = SH.Widgets:Label(header, "Account-wide encounter, warning, layout, and frame settings.")
+    hint:SetPoint("TOPLEFT", header.title, "BOTTOMLEFT", 0, -7)
     hint:SetTextColor(unpack(SH.Widgets.colors.textMuted))
 
-    local topClose = SH.Widgets:Button(content, "×", 30, 30, function() frame:Hide() end, "danger")
+    local topClose = SH.Widgets:Button(header, "×", 30, 30, function() frame:Hide() end, "danger")
     topClose:SetPoint("TOPRIGHT", -14, -14)
     topClose.tooltip = "Close configuration"
 
+    local scroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
+    scroll:SetPoint("BOTTOMRIGHT", -28, 16)
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetSize(730, 992)
+    scroll:SetScrollChild(content)
+
     local options = SH.Store:Options()
     self.scaleControls = {}
-    local frameSection = makeSection(content, "Frame Options", -78, 208)
+    local frameSection = makeSection(content, "Frame Options", -6, 208)
     addToggle(frameSection, "Preview Frames", CELL_LEFT, -34, function() return options.previewFrames end, function(v) options.previewFrames = v end)
     addToggle(frameSection, "Lock Frames", CELL_RIGHT, -34, function() return options.lockFrames end, function(v) options.lockFrames = v end)
     addToggle(frameSection, "Room Mini Map", CELL_LEFT, -68, function() return options.showRoomMap end, function(v) options.showRoomMap = v end)
@@ -187,13 +192,11 @@ function UI:Ensure()
     end)
     addOpacityControl(frameSection, CELL_LEFT, -170, options)
 
-    local macros = makeSection(content, "NSRT Macro Buttons", -294, 106)
+    local macros = makeSection(content, "NSRT Macro Buttons", -222, 140)
     addToggle(macros, "NSRT Macro Buttons", CELL_LEFT, -34, function() return options.showNSRTMacros end, function(v)
         options.showNSRTMacros = v
-        if v then
-            SH.NSRTMacros.inRoom = nil
-            SH.NSRTMacros:OnZoneChanged()
-        end
+        if v then SH.NSRTMacros.inRoom = nil end
+        SH.NSRTMacros:OnZoneChanged()
     end)
     addToggle(macros, "Attach to Map", CELL_LEFT, -68, function() return options.nsrtAttachToMap end, function(v)
         options.nsrtAttachToMap = v
@@ -205,6 +208,10 @@ function UI:Ensure()
         SH.NSRTMacros.lastSubzone = nil
         SH.NSRTMacros:OnZoneChanged()
     end)
+    addToggle(macros, "Double Row", CELL_LEFT, -102, function() return options.nsrtDoubleRow end, function(v)
+        options.nsrtDoubleRow = v
+        SH.NSRTMacros:ApplyScale()
+    end)
     local createMacros = SH.Widgets:Button(macros, "Create NSRT Macros", 174, 24, function()
         SH.NSRTMacros:CreateOrRepairMacros()
     end, "primary")
@@ -212,14 +219,10 @@ function UI:Ensure()
     createMacros.tooltip = "Creates or repairs NSRT_SSZORAK_1 through NSRT_SSZORAK_8 using NorthernSky's matching icons and /raid messages. This overwrites macros already using those reserved names."
     self.createMacrosButton = createMacros
 
-    local intermission = makeSection(content, "Intermission Options", -408, 70)
-    addToggle(intermission, "Rotate Mini Map", CELL_LEFT, -34, function() return options.rotateMap end, function(v)
-        options.rotateMap = v
-        if not v then SH.RoomMap:StopRotation() end
-    end)
-    addToggle(intermission, "Show Push Direction Warning", CELL_RIGHT, -34, function() return options.raidWarningPushes end, function(v) options.raidWarningPushes = v end)
+    local intermission = makeSection(content, "Intermission Options", -370, 70)
+    addToggle(intermission, "Show Push Direction Warning", CELL_LEFT, -34, function() return options.raidWarningPushes end, function(v) options.raidWarningPushes = v end)
 
-    local other = makeSection(content, "Personal Warnings / NSRT", -486, 138)
+    local other = makeSection(content, "Personal Warnings / NSRT", -448, 138)
     addToggle(other, "Show Drop Location Warning", CELL_LEFT, -34, function() return options.raidWarningSurges end, function(v) options.raidWarningSurges = v end)
     addToggle(other, "TTS Warnings", CELL_RIGHT, -34, function() return options.ttsWarnings end, function(v) options.ttsWarnings = v end)
     local fontCell = optionCell(other, CELL_LEFT, -68, CELL_WIDTH)
@@ -245,7 +248,7 @@ function UI:Ensure()
         if userInput then SH.PersonalWarning:Show("%s", "Personal warning preview") end
     end)
     self.warningDelaySlider:SetPoint("RIGHT", -12, 0)
-    local difficulty = makeSection(content, "Enabled Difficulties", -632, 104)
+    local difficulty = makeSection(content, "Enabled Difficulties", -594, 104)
     self.difficultyGearButtons = {}
     for index, definition in ipairs(SH.Const.DIFFICULTIES) do
         local difficultyID = definition.id
@@ -265,7 +268,7 @@ function UI:Ensure()
         self.difficultyGearButtons[difficultyID] = gear
     end
 
-    local layoutSection = makeSection(content, "Marker Layout", -744, 280)
+    local layoutSection = makeSection(content, "Marker Layout", -706, 280)
     local layoutHint = SH.Widgets:Label(layoutSection, "Choose New to edit. Click two positions to swap their markers.")
     layoutHint:SetPoint("TOPLEFT", 10, -38)
     layoutHint:SetWidth(450)
@@ -351,6 +354,7 @@ function UI:Ensure()
     end)
 
     self.frame = frame
+    self.header, self.scroll, self.content = header, scroll, content
     self.publishButton = publish
     self.resetLayoutButton = resetLayout
     self.testButton = test

@@ -1,6 +1,11 @@
-## Unreleased
+## 12.1.4
 
-- Show and hide the room mini map alongside the NSRT macro panel during automatic room changes, respecting Room Mini Map and Lock Frames settings.
+- Added an optional Double Row layout for NSRT macros, with opposite markers aligned vertically.
+- Removed macro status text for a more compact frame.
+- Improved detached macro-frame positioning and preview visibility.
+- Fixed the room map failing to show when NSRT buttons are disabled.
+- Configuration header and close button now stay visible while scrolling.
+- Removed the unsupported mini map rotation feature.
 
 ## 12.1.2
 

@@ -4,12 +4,11 @@ SH.RoomMap = {initializeOrder = 30}
 SH.modules.RoomMap = SH.RoomMap
 
 local TWO_PI = math.pi * 2
-local INTERMISSION_ROOM_ROTATION = math.pi / 4
 local MAP_RADIUS = 104
 local EDGE_RADIUS = 126
 
-local function pointFor(position, radius, rotation)
-    local angle = ((position - 1) * (TWO_PI / 8)) + (rotation or 0)
+local function pointFor(position, radius)
+    local angle = (position - 1) * (TWO_PI / 8)
     return math.sin(angle) * radius, math.cos(angle) * radius
 end
 
@@ -80,13 +79,6 @@ function SH.RoomMap:OnInitialize()
         frame.groups[position] = group
     end
 
-    frame.rotatingMarkers = {}
-    for position = 1, 8 do
-        local marker = frame:CreateTexture(nil, "OVERLAY")
-        marker:Hide()
-        frame.rotatingMarkers[position] = marker
-    end
-
     frame.clear = SH.Widgets:Button(frame, "Clear", 70, 24, function()
         if SH.Comms then SH.Comms:RequestClear() end
     end, "danger")
@@ -94,7 +86,7 @@ function SH.RoomMap:OnInitialize()
 
     SH.Widgets:MakeMovable(frame, "roomMap", frame)
     self.frame = frame
-    self:Reposition(0)
+    self:Reposition()
     self:RefreshLayout()
     self:RefreshAssignments()
     self:ApplyBackgroundOpacity()
@@ -110,11 +102,11 @@ function SH.RoomMap:ApplyBackgroundOpacity()
     self.frame.circle:SetVertexColor(0.025, 0.05, 0.065, 0)
 end
 
-function SH.RoomMap:Reposition(rotation)
+function SH.RoomMap:Reposition()
     local centerY = -5
     local vertices = {}
     for position = 1, 8 do
-        local x, y = pointFor(position, EDGE_RADIUS, rotation)
+        local x, y = pointFor(position, EDGE_RADIUS)
         vertices[position] = {x, y + centerY}
     end
     for index, edge in ipairs(self.frame.edges) do
@@ -123,33 +115,9 @@ function SH.RoomMap:Reposition(rotation)
         edge:SetEndPoint("CENTER", self.frame, "CENTER", vertices[nextIndex][1], vertices[nextIndex][2])
     end
     for position, group in ipairs(self.frame.groups) do
-        local x, y = pointFor(position, MAP_RADIUS, rotation)
+        local x, y = pointFor(position, MAP_RADIUS)
         group:ClearAllPoints()
         group:SetPoint("CENTER", self.frame, "CENTER", x, y + centerY)
-    end
-end
-
-
-function SH.RoomMap:PrepareRotatingMarkers()
-    local layout = SH.Store:GetLayout()
-    local rotationScale = math.sqrt(2)
-    local layerSize = 264 * rotationScale
-    local layerHalf = layerSize * 0.5
-    local markerHalf = 36 * rotationScale * 0.5
-    for position, marker in ipairs(self.frame.rotatingMarkers) do
-        local x, y = pointFor(position, MAP_RADIUS, INTERMISSION_ROOM_ROTATION)
-        local targetX = x * rotationScale
-        local targetY = (y - 5) * rotationScale
-        marker:SetRotation(0)
-        marker:SetTexture(string.format("Interface\\TargetingFrame\\UI-RaidTargetingIcon_%d", layout[position]))
-        marker:SetSize(layerSize, layerSize)
-        marker:ClearAllPoints()
-        marker:SetPoint("CENTER", self.frame, "CENTER", 0, 0)
-        marker:ClearVertexOffsets()
-        marker:SetVertexOffset(UPPER_LEFT_VERTEX, targetX - markerHalf + layerHalf, targetY + markerHalf - layerHalf)
-        marker:SetVertexOffset(LOWER_LEFT_VERTEX, targetX - markerHalf + layerHalf, targetY - markerHalf + layerHalf)
-        marker:SetVertexOffset(UPPER_RIGHT_VERTEX, targetX + markerHalf - layerHalf, targetY + markerHalf - layerHalf)
-        marker:SetVertexOffset(LOWER_RIGHT_VERTEX, targetX + markerHalf - layerHalf, targetY - markerHalf + layerHalf)
     end
 end
 
@@ -159,7 +127,6 @@ function SH.RoomMap:RefreshLayout()
         local markerID = tonumber(layout[position]) or position
         group.marker:SetTexture(string.format("Interface\\TargetingFrame\\UI-RaidTargetingIcon_%d", markerID))
     end
-    self:PrepareRotatingMarkers()
 end
 
 function SH.RoomMap:RefreshAssignments()
@@ -189,7 +156,7 @@ function SH.RoomMap:RefreshAssignments()
             end
         end
     end
-    self.frame.clear:SetShown(SH.Store:Options().showClearButton == true and not self.rotating)
+    self.frame.clear:SetShown(SH.Store:Options().showClearButton == true)
 end
 
 function SH.RoomMap:SetUnlocked(unlocked)
@@ -200,72 +167,8 @@ end
 
 function SH.RoomMap:RefreshVisibility()
     local options = SH.Store:Options()
-    local autoShown = options.nsrtAutoShow and options.showNSRTMacros and SH.NSRTMacros and SH.NSRTMacros.autoRoomVisible
+    local autoShown = options.nsrtAutoShow and SH.NSRTMacros and SH.NSRTMacros.autoRoomVisible
     local context = (SH.Encounter and SH.Encounter.active) or (SH.Encounter and SH.Encounter.testMode) or options.previewFrames or autoShown
     self:SetUnlocked(context and not options.lockFrames)
     self.frame:SetShown(context and options.showRoomMap)
-end
-
-local function showCompassTexture()
-    if not MinimapCompassTexture then return end
-    local metatable = getmetatable(MinimapCompassTexture)
-    local methods = metatable and metatable.__index
-    local realShow = type(methods) == "table" and methods.Show
-    if type(realShow) == "function" then realShow(MinimapCompassTexture) else MinimapCompassTexture:Show() end
-end
-
-function SH.RoomMap:StartRotation()
-    if self.rotating or not SH.Store:Options().rotateMap then return end
-    self.rotating = true
-    self.elapsed = 0
-    self:PrepareRotatingMarkers()
-    for _, group in ipairs(self.frame.groups) do group:Hide() end
-    for _, marker in ipairs(self.frame.rotatingMarkers) do marker:Show() end
-    self.frame.clear:Hide()
-    self.previousRotateMinimap = GetCVar("rotateMinimap")
-    if MinimapCompassTexture then
-        self.compassWasShown = MinimapCompassTexture:IsShown()
-        self.compassAlpha = MinimapCompassTexture:GetAlpha()
-        if not self.compassWasShown then MinimapCompassTexture:SetAlpha(0) end
-        showCompassTexture()
-    end
-    if self.previousRotateMinimap ~= "1" then
-        C_CVar.SetCVar("rotateMinimap", "1")
-        if MinimapCluster and MinimapCluster.SetRotateMinimap then MinimapCluster:SetRotateMinimap(true) end
-    end
-    self.frame:SetScript("OnUpdate", function(_, elapsed)
-        SH.RoomMap.elapsed = SH.RoomMap.elapsed + elapsed
-        if SH.RoomMap.elapsed < 0.05 then return end
-        SH.RoomMap.elapsed = 0
-        if not MinimapCompassTexture then return end
-        local ok, rotation = pcall(MinimapCompassTexture.GetRotation, MinimapCompassTexture)
-        if ok then
-            for _, marker in ipairs(SH.RoomMap.frame.rotatingMarkers) do marker:SetRotation(rotation) end
-        end
-    end)
-end
-
-function SH.RoomMap:StopRotation()
-    if not self.rotating then return end
-    self.rotating = false
-    self.frame:SetScript("OnUpdate", nil)
-    for _, marker in ipairs(self.frame.rotatingMarkers) do
-        marker:SetRotation(0)
-        marker:Hide()
-    end
-    for _, group in ipairs(self.frame.groups) do group:Show() end
-    self.frame.clear:SetShown(SH.Store:Options().showClearButton == true)
-    if self.previousRotateMinimap ~= nil then
-        C_CVar.SetCVar("rotateMinimap", self.previousRotateMinimap)
-        if MinimapCluster and MinimapCluster.SetRotateMinimap then
-            MinimapCluster:SetRotateMinimap(self.previousRotateMinimap == "1")
-        end
-    end
-    if MinimapCompassTexture then
-        if not self.compassWasShown then MinimapCompassTexture:Hide() end
-        MinimapCompassTexture:SetAlpha(self.compassAlpha or 1)
-    end
-    self.previousRotateMinimap = nil
-    self.compassWasShown = nil
-    self.compassAlpha = nil
 end

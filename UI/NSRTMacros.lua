@@ -10,13 +10,21 @@ SH.NSRTMacros = {
 SH.modules.NSRTMacros = SH.NSRTMacros
 
 local PANEL_WIDTH = 348
-local PANEL_HEIGHT = 132
+local PANEL_HEIGHT = 100
 local SLOT_WIDTH = 48
 local SLOT_HEIGHT = 58
 local SLOT_GAP = 8
 local SLOT_START_X = 10
 local MACRO_ICONS = {"137001", "137002", "137003", "137004", "137005", "137006", "137007", "137008"}
 local MACRO_POSITIONS = {2, 3, 4, 6, 7, 8}
+
+local function slotPoint(slotIndex, doubleRow)
+    local columns = doubleRow and 3 or 6
+    local column = (slotIndex - 1) % columns
+    -- Keep bindings stable: the left-side markers (slots 4-6) sit above their opposites.
+    local row = doubleRow and slotIndex > 3 and 1 or 0
+    return SLOT_START_X + column * (SLOT_WIDTH + SLOT_GAP), 8 + row * (SLOT_HEIGHT + SLOT_GAP)
+end
 
 local function macroName(markerID)
     return "NSRT_SSZORAK_" .. tostring(markerID)
@@ -53,7 +61,7 @@ function SH.NSRTMacros:OnZoneChanged()
     local subzone = GetSubZoneText()
     local inRoom = supported and subzone == "Altar of the Six Winds"
     local outsideRoom = supported and (subzone == "The Serpent Warren" or subzone == "Pit of Fangs")
-    if options.nsrtAutoShow and options.showNSRTMacros then
+    if options.nsrtAutoShow then
         -- Manual visibility lasts until the next room entry. Only recognized rooms auto-hide.
         if inRoom and not self.inRoom then
             self.pendingAutoVisibility = true
@@ -67,7 +75,7 @@ function SH.NSRTMacros:OnZoneChanged()
     end
     self.inRoom = inRoom
     self.lastSubzone = subzone
-    if not supported or not options.nsrtAutoShow or not options.showNSRTMacros then
+    if not supported or not options.nsrtAutoShow then
         self.autoRoomVisible = false
     end
     if self.pendingAutoVisibility ~= nil and not InCombatLockdown() then
@@ -135,6 +143,7 @@ function SH.NSRTMacros:OnInitialize()
     secure:SetSize(PANEL_WIDTH, PANEL_HEIGHT)
     secure:SetFrameStrata("HIGH")
     secure:SetFrameLevel(100)
+    secure:EnableMouse(false)
     secure:SetClampedToScreen(true)
     secure:Hide()
 
@@ -145,17 +154,17 @@ function SH.NSRTMacros:OnInitialize()
     frame:SetClampedToScreen(true)
     frame:Hide()
     SH.Widgets:ApplyBackdrop(frame, SH.Widgets.colors.canvas, SH.Widgets.colors.borderStrong)
-    SH.Widgets:MakeMovable(frame, "nsrtMacros", frame)
+    -- Keep the drag handle above the separate secure click layer.
+    frame.dragHandle = CreateFrame("Frame", nil, frame)
+    frame.dragHandle:SetPoint("TOPLEFT", 0, 0)
+    frame.dragHandle:SetPoint("TOPRIGHT", -74, 0)
+    frame.dragHandle:SetHeight(28)
+    frame.dragHandle:SetFrameLevel(secure:GetFrameLevel() + 10)
+    SH.Widgets:MakeMovable(frame, "nsrtMacros", frame.dragHandle)
 
     frame.title = SH.Widgets:Label(frame, "NSRT MACROS")
     frame.title:SetPoint("TOPLEFT", 10, -7)
     frame.title:SetTextColor(unpack(SH.Widgets.colors.navigation))
-    frame.status = SH.Widgets:Label(frame, "Complete wind assignments first")
-    frame.status:SetPoint("TOPLEFT", 10, -32)
-    frame.status:SetWidth(PANEL_WIDTH - 20)
-    frame.status:SetJustifyH("CENTER")
-    frame.status:SetWordWrap(false)
-    frame.status:SetTextColor(unpack(SH.Widgets.colors.textMuted))
 
     frame.slots = {}
     secure.buttons = {}
@@ -163,6 +172,7 @@ function SH.NSRTMacros:OnInitialize()
         SH.NSRTMacros:SetPanelOpen(false)
     end, "secondary")
     hide:SetPoint("TOPRIGHT", -10, -3)
+    hide:SetFrameLevel(secure:GetFrameLevel() + 10)
     hide.tooltip = "Hide this macro panel. Reopen with /sh macros or right-click the minimap button. During combat, hiding waits until combat ends."
 
     for slotIndex = 1, #MACRO_POSITIONS do
@@ -242,17 +252,29 @@ end
 
 function SH.NSRTMacros:ApplyAttachment()
     if not self.frame or InCombatLockdown() then return end
-    local attached = SH.Store:Options().nsrtAttachToMap
+    local options = SH.Store:Options()
+    local attached = options.nsrtAttachToMap
+    -- A detached panel can overlap Configuration. Keep the preview draggable above it,
+    -- including when Configuration is raised again, with both click and visual layers together.
+    local strata = options.previewFrames and not attached and "TOOLTIP" or "HIGH"
+    self.frame:SetFrameStrata(strata)
+    self.secureFrame:SetFrameStrata(strata)
     if self.attached ~= attached then
+        local centerX, centerY
+        if self.attached and not attached then centerX, centerY = self.frame:GetCenter() end
         self.frame:ClearAllPoints()
         if attached then
             self.frame:SetPoint("TOP", SH.RoomMap.frame, "BOTTOM", 0, 0)
+        elseif centerX and centerY then
+            -- Detaching keeps the current screen location; only a fresh detached frame restores its save.
+            self.frame:SetPoint("CENTER", UIParent, "BOTTOMLEFT", centerX, centerY)
+            SH.Store:SaveFrame("nsrtMacros", self.frame)
         else
             SH.Store:ApplyFrame("nsrtMacros", self.frame)
         end
         self.attached = attached
     end
-    self:SetUnlocked(not SH.Store:Options().lockFrames)
+    self:SetUnlocked(not options.lockFrames)
     self:ApplySecurePosition()
 end
 
@@ -275,14 +297,23 @@ function SH.NSRTMacros:ApplyScale()
         self.pendingSecureRefresh = true
         return
     end
+    self.doubleRow = SH.Store:Options().nsrtDoubleRow == true
+    local width = self.doubleRow and (SLOT_START_X * 2 + SLOT_WIDTH * 3 + SLOT_GAP * 2) or PANEL_WIDTH
+    local height = PANEL_HEIGHT + (self.doubleRow and (SLOT_HEIGHT + SLOT_GAP) or 0)
+    self.frame:SetSize(width, height)
     self.frame:SetScale(scale)
     self.secureFrame:SetScale(1)
-    self.secureFrame:SetSize(PANEL_WIDTH * scale, PANEL_HEIGHT * scale)
+    self.secureFrame:SetSize(width * scale, height * scale)
     for slotIndex, button in ipairs(self.secureFrame.buttons) do
-        local x = SLOT_START_X + ((slotIndex - 1) * (SLOT_WIDTH + SLOT_GAP))
+        local x, y = slotPoint(slotIndex, self.doubleRow)
+        local slot = self.frame.slots[slotIndex]
+        slot:ClearAllPoints()
+        slot:SetPoint("BOTTOMLEFT", x, y)
+        slot.blocker:ClearAllPoints()
+        slot.blocker:SetPoint("BOTTOMLEFT", x, y)
         button:ClearAllPoints()
         button:SetSize(SLOT_WIDTH * scale, SLOT_HEIGHT * scale)
-        button:SetPoint("BOTTOMLEFT", x * scale, 8 * scale)
+        button:SetPoint("BOTTOMLEFT", x * scale, y * scale)
     end
     self:ApplySecurePosition()
 end
@@ -357,7 +388,6 @@ function SH.NSRTMacros:RefreshHighlights()
         if markerID then orderByMarker[markerID] = order end
     end
 
-    local nextAvailable = false
     for slotIndex, slot in ipairs(self.frame.slots) do
         local order = orderByMarker[self.markerIDs[slotIndex]]
         if order then
@@ -373,21 +403,6 @@ function SH.NSRTMacros:RefreshHighlights()
             isNext and SH.Widgets.colors.pinkBorder or (completed and SH.Widgets.colors.successBorder or SH.Widgets.colors.border))
         -- Suggestions are visual only. Keep working macros clickable for retries.
         slot.blocker:SetShown(not self.available[slotIndex])
-        if isNext then nextAvailable = true end
-    end
-
-    if not self.expected then
-        self.frame.status:SetText("Click a marker, or select winds")
-        self.frame.status:SetTextColor(unpack(SH.Widgets.colors.textMuted))
-    elseif self.nextStep > 3 then
-        self.frame.status:SetText("Clicked 1-3 (delivery unconfirmed)")
-        self.frame.status:SetTextColor(unpack(SH.Widgets.colors.navigation))
-    elseif nextAvailable then
-        self.frame.status:SetText("Press macro " .. tostring(self.nextStep))
-        self.frame.status:SetTextColor(unpack(SH.Widgets.colors.textSecondary))
-    else
-        self.frame.status:SetText("Required macro missing or changed")
-        self.frame.status:SetTextColor(unpack(SH.Widgets.colors.dangerBorder))
     end
 end
 

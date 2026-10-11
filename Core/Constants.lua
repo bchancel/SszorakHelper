@@ -56,13 +56,12 @@ function SH.Const:IntermissionEvents(index, start)
         {id = prefix .. "wind1", label = "Intermission " .. index .. " - Wind 1", kind = "wind", index = 1, time = start},
         {id = prefix .. "wind2", label = "Intermission " .. index .. " - Wind 2", kind = "wind", index = 2, time = start + 8},
         {id = prefix .. "wind3", label = "Intermission " .. index .. " - Wind 3", kind = "wind", index = 3, time = start + 18},
-        {id = prefix .. "rotationStop", label = "Intermission " .. index .. " - Rotation stop", kind = "rotationStop", index = index, time = start + 25},
         {id = prefix .. "phaseReset", label = "Intermission " .. index .. " end / reset", kind = "phaseReset", index = index, time = start + 30},
     }
 end
 
 function SH.Const:SortSchedule(events)
-    local priority = {surge = 1, intermission = 2, wind = 3, rotationStop = 4, phaseReset = 5}
+    local priority = {surge = 1, intermission = 2, wind = 3, phaseReset = 4}
     table.sort(events, function(a, b)
         if a.time == b.time then return priority[a.kind] < priority[b.kind] end
         return a.time < b.time

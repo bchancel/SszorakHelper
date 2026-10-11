@@ -46,7 +46,7 @@ local function protected(frame)
     if combat and frame.secure then error("secure frame mutated during combat") end
 end
 local function frame(parent, secure)
-    return setmetatable({shown = true, scripts = {}, attributes = {}, registeredEvent = false, secure = secure or (parent and parent.secure) or false}, {__index = frameMethods})
+    return setmetatable({parent = parent or false, moving = false, shown = true, scripts = {}, attributes = {}, registeredEvent = false, secure = secure or (parent and parent.secure) or false}, {__index = frameMethods})
 end
 function frameMethods:SetAttribute(key, value) protected(self); self.attributes[key] = value end
 function frameMethods:GetAttribute(key) return self.attributes[key] end
@@ -54,13 +54,23 @@ function frameMethods:RegisterForClicks(...) self.clicks = {...} end
 function frameMethods:SetScript(key, value) self.scripts[key] = value end
 function frameMethods:CreateFontString() return frame(self) end
 function frameMethods:CreateTexture() return frame(self) end
+function frameMethods:CreateLine() return frame(self) end
 function frameMethods:Show() protected(self); self.shown = true end
 function frameMethods:Hide() protected(self); self.shown = false end
 function frameMethods:SetShown(value) protected(self); self.shown = value and true or false end
 function frameMethods:IsShown() return self.shown end
 function frameMethods:SetText(value) self.textValue = value end
 function frameMethods:GetText() return self.textValue end
-function frameMethods:GetFrameLevel() return 1 end
+function frameMethods:GetParent() return self.parent end
+function frameMethods:GetFrameLevel() return rawget(self, "level") or 1 end
+function frameMethods:SetFrameLevel(value) self.level = value end
+function frameMethods:SetFrameStrata(value) protected(self); self.strata = value end
+function frameMethods:GetFrameStrata() return rawget(self, "strata") or (self.parent and self.parent:GetFrameStrata()) end
+function frameMethods:EnableMouse(value) self.mouseEnabled = value end
+function frameMethods:RegisterForDrag(...) self.dragButtons = {...} end
+function frameMethods:StartMoving() self.moving = true end
+function frameMethods:StopMovingOrSizing() self.moving = false end
+function frameMethods:SetVerticalScroll(value) self.scrollOffset = value end
 function frameMethods:SetChecked(value) self.checked = value end
 function frameMethods:GetChecked() return self.checked end
 function frameMethods:IsEnabled() return self.enabled ~= false end
@@ -72,15 +82,17 @@ function frameMethods:SetValue(value)
 end
 function frameMethods:SetFormattedText(format, ...) self.formatted = {format, ...} end
 function frameMethods:SetFont(path, size) self.fontSize = size end
-function frameMethods:GetCenter() return 400, 300 end
-function frameMethods:GetEffectiveScale() return 1 end
+function frameMethods:GetCenter() return rawget(self, "centerX") or 400, rawget(self, "centerY") or 300 end
+function frameMethods:GetEffectiveScale() return (rawget(self, "scale") or 1) * (self.parent and self.parent:GetEffectiveScale() or 1) end
 function frameMethods:SetScale(value) protected(self); self.scale = value end
 function frameMethods:SetPoint(...) protected(self); self.point = {...} end
 function frameMethods:GetPoint() return unpack(self.point or {"CENTER", UIParent, "CENTER", 0, 0}) end
 function frameMethods:RegisterUnitEvent(event, unit) self.registeredEvent = event; self.registeredUnit = unit end
 function frameMethods:UnregisterEvent(event) if self.registeredEvent == event then self.registeredEvent = false end end
 function frameMethods:ClearAllPoints() protected(self) end
-function frameMethods:SetSize(...) protected(self) end
+function frameMethods:SetSize(width, height) protected(self); self.width, self.height = width, height end
+function frameMethods:GetWidth() return self.width end
+function frameMethods:GetHeight() return self.height end
 setmetatable(frameMethods, {__index = function() return noop end})
 UIParent = frame()
 CreateFrame = function(_, _, parent, template)
@@ -98,19 +110,18 @@ loadModule("Core/Store.lua")
 SH.Store:OnInitialize()
 check(SH.Store:Options().frameBackgroundOpacity == 0.5, "fresh opacity must be 50 percent")
 SH.Store:Options().frameBackgroundOpacity = 0.25
+SH.Store:Options().rotateMap = true
+SH.Store:Options().observedSchedules[14] = {
+    {id = "intermission4rotationStop", kind = "rotationStop", time = 600},
+}
 SH.Store:OnInitialize()
 check(SH.Store:Options().frameBackgroundOpacity == 0.25, "saved opacity was overwritten")
-local colors = setmetatable({}, {__index = function() return {1, 1, 1, 1} end})
-SH.Widgets = {
-    colors = colors,
-    ApplyBackdrop = noop,
-    MakeMovable = noop,
-    Label = function(parent) return frame(parent) end,
-    Text = function(parent) return frame(parent) end,
-    Button = function(parent, _, _, _, callback)
-        local b = frame(parent); b.callback = callback; return b
-    end,
-}
+check(SH.Store:Options().rotateMap == nil, "removed rotation option survived migration")
+for _, event in ipairs(SH.Store:GetTimings(14)) do
+    check(event.kind ~= "rotationStop", "removed rotation event remained in schedule editor")
+end
+check(SH.Store:Options().nsrtDoubleRow == false, "double row must be opt-in")
+loadModule("UI/Widgets.lua")
 SH.RoomMap = setmetatable({frame = frame()}, {__index = function() return noop end})
 loadModule("UI/OrderFrame.lua")
 SH.OrderFrame:OnInitialize()
@@ -218,7 +229,7 @@ check(SH.NSRTMacros.nextStep == 2, "mouse-down double counted")
 SH.NSRTMacros:OnMacroClicked(2)
 SH.NSRTMacros:OnMacroClicked(4)
 check(SH.NSRTMacros.nextStep == 4, "side-macro sequence did not finish after three clicks")
-check(SH.NSRTMacros.frame.status.textValue == "Clicked 1-3 (delivery unconfirmed)", "panel still requested an exit click")
+check(rawget(SH.NSRTMacros.frame, "status") == nil, "macro panel still includes status text")
 combat = false
 for _, callback in ipairs(handlers.PLAYER_REGEN_ENABLED) do callback() end
 check(not SH.NSRTMacros.secureFrame:IsShown(), "queued hide not applied")
@@ -349,7 +360,8 @@ SH.Encounter:Start("Sszorak", 15)
 local scheduled = SH.Encounter.timers
 check(scheduled["schedule:surge1"].delay == 31.25, "edited first cast did not move warning")
 check(math.abs(scheduled["schedule:surge2"].delay - 81.44) < 0.001, "second surge is not from pull")
-check(scheduled["schedule:intermission1"].delay == 111.17, "intermission time incorrect")
+check(SH.Encounter.scheduleByID.intermission1.time == 111.17, "intermission time incorrect")
+check(not scheduled["schedule:intermission1"], "reference-only intermission started a timer")
 check(scheduled["schedule:intermission1wind3"].delay == 129.17, "Wind 3 time incorrect")
 local firstSurge = scheduled["schedule:surge1"]
 SH.Encounter:OnTimelineAdded({source = 0, id = 101, duration = 32.22})
@@ -380,7 +392,7 @@ SH.Encounter:Stop()
 -- Unlisted occurrences still use live events and record completed timings.
 SH.Encounter:Start("Sszorak", 17)
 check(SH.Encounter.timers["schedule:surge1"].delay == 33.25, "Raid Finder did not schedule Normal's first surge")
-check(SH.Encounter.timers["schedule:intermission1"].delay == 125, "Raid Finder did not schedule Normal's intermission")
+check(SH.Encounter.scheduleByID.intermission1.time == 125, "Raid Finder did not use Normal's intermission")
 SH.Encounter.totalSurgeIndex, SH.Encounter.intermissionIndex = 5, 3
 now = SH.Encounter.startedAt + 450
 SH.Encounter:OnTimelineAdded({source = 0, id = 201, duration = 36})
@@ -419,10 +431,25 @@ check(not SH.Encounter.timers["schedule:intermission4"], "cancelled intermission
 SH.Encounter:Stop()
 
 -- Build actual option widgets; drafts, invalid input, defaults, and every difficulty gear.
-loadModule("UI/Widgets.lua")
 _G.SszorakHelper = SH
 loadModule("Options/Configuration.lua")
 SH.OptionsUI:Ensure()
+check(SH.OptionsUI.header:GetParent() == SH.OptionsUI.frame, "configuration header is inside scrolling content")
+check(SH.OptionsUI.header.title:GetParent() == SH.OptionsUI.header, "configuration title is not fixed")
+check(SH.OptionsUI.topCloseButton:GetParent() == SH.OptionsUI.header, "close button is inside scrolling content")
+check(SH.OptionsUI.content:GetParent() == SH.OptionsUI.scroll, "options content stopped scrolling")
+local headerPoint, closePoint = SH.OptionsUI.header.point, SH.OptionsUI.topCloseButton.point
+SH.OptionsUI.scroll:SetVerticalScroll(150)
+check(SH.OptionsUI.header.point == headerPoint and SH.OptionsUI.topCloseButton.point == closePoint, "scrolling moved the fixed header")
+local doubleRowCheck, attachToMapCheck
+for _, entry in ipairs(SH.OptionsUI.optionChecks) do
+    if entry.check:GetParent().label:GetText() == "Double Row" then doubleRowCheck = entry.check end
+    if entry.check:GetParent().label:GetText() == "Attach to Map" then attachToMapCheck = entry.check end
+end
+check(doubleRowCheck and doubleRowCheck:GetParent():GetParent().title:GetText() == "NSRT MACRO BUTTONS", "double row toggle is missing from NSRT section")
+SH.OptionsUI.frame:Show()
+SH.OptionsUI.topCloseButton.scripts.OnClick(SH.OptionsUI.topCloseButton)
+check(not SH.OptionsUI.frame:IsShown(), "fixed close button did not close configuration")
 SH.OptionsUI:ShowTimingDialog(17)
 check(not SH.OptionsUI.timingDialog.panel.empty:IsShown(), "Raid Finder editor is empty")
 check(SH.OptionsUI.timingDialog.panel.save:IsEnabled(), "Raid Finder schedule cannot be saved")
@@ -538,16 +565,40 @@ SH.NSRTMacros:OnZoneChanged()
 check(SH.NSRTMacros.secureFrame:IsShown(), "disabled room automation still hid panel")
 options.showNSRTMacros, options.nsrtAutoShow = true, false
 
--- Detached positions persist; reattaching and combat changes keep both layers aligned.
+-- Detaching keeps the current location; a fresh detached panel restores its saved position.
 options.nsrtAttachToMap, options.lockFrames = false, false
+SH.Store.db.frames.nsrtMacros = {point = "CENTER", relativePoint = "CENTER", x = 123, y = 45}
+SH.NSRTMacros:ApplyAttachment()
+check(SH.NSRTMacros.frame.point[2] == UIParent and SH.NSRTMacros.frame.point[3] == "BOTTOMLEFT"
+    and SH.NSRTMacros.frame.point[4] == 400 and SH.NSRTMacros.frame.point[5] == 300, "detaching moved the panel away from the map")
+check(SH.Store:FrameState("nsrtMacros").x == 400, "detached current position was not saved")
+SH.NSRTMacros.attached = nil
 SH.Store.db.frames.nsrtMacros = {point = "CENTER", relativePoint = "CENTER", x = 123, y = 45}
 SH.NSRTMacros:ApplyAttachment()
 check(SH.NSRTMacros.frame.point[2] == UIParent and SH.NSRTMacros.frame.point[4] == 123, "detached saved anchor not used")
 check(SH.NSRTMacros.frame._shUnlocked, "detached macros did not unlock")
-SH.Widgets:MakeMovable(SH.NSRTMacros.frame, "nsrtMacros")
+local dragHandle = SH.NSRTMacros.frame.dragHandle
+check(dragHandle.mouseEnabled and dragHandle.dragButtons[1] == "LeftButton", "macro header cannot receive dragging")
+check(dragHandle:GetFrameLevel() > SH.NSRTMacros.secureFrame:GetFrameLevel(), "secure layer covers macro drag handle")
+check(not SH.NSRTMacros.secureFrame.mouseEnabled, "secure container blocks header input")
+dragHandle.scripts.OnDragStart()
+check(SH.NSRTMacros.frame.moving, "detached macro header did not start moving")
 SH.NSRTMacros.frame:SetPoint("CENTER", UIParent, "CENTER", 231, 54)
-SH.NSRTMacros.frame.scripts.OnDragStop()
+SH.NSRTMacros.frame.centerX, SH.NSRTMacros.frame.centerY = 500, 350
+dragHandle.scripts.OnDragStop()
+check(not SH.NSRTMacros.frame.moving, "macro drag did not stop")
 check(SH.Store:FrameState("nsrtMacros").x == 231, "macro drag did not save")
+check(SH.NSRTMacros.secureFrame.point[4] == 375 and SH.NSRTMacros.secureFrame.point[5] == 262.5, "dragged macro click layer was not repositioned")
+options.lockFrames = true
+SH.NSRTMacros:ApplyAttachment()
+dragHandle.scripts.OnDragStart()
+check(not SH.NSRTMacros.frame.moving, "locked macro panel moved")
+options.lockFrames = false
+SH.NSRTMacros:ApplyAttachment()
+combat = true
+dragHandle.scripts.OnDragStart()
+check(not SH.NSRTMacros.frame.moving, "macro panel moved during combat")
+combat = false
 options.nsrtAttachToMap = true
 combat = true
 SH.NSRTMacros:ApplyAttachment()
@@ -556,10 +607,88 @@ combat = false
 for _, callback in ipairs(handlers.PLAYER_REGEN_ENABLED) do callback() end
 check(SH.NSRTMacros.frame.point[2] == SH.RoomMap.frame, "attachment was not applied after combat")
 check(not SH.NSRTMacros.frame._shUnlocked, "attached macro panel independently movable")
+dragHandle.scripts.OnDragStart()
+check(not SH.NSRTMacros.frame.moving, "attached macro header moved independently")
 options.nsrtAttachToMap = false
 SH.NSRTMacros:ApplyAttachment()
-check(SH.NSRTMacros.frame.point[4] == 231, "reattach lost detached position")
+check(SH.NSRTMacros.frame.point[4] == 500 and SH.NSRTMacros.frame.point[5] == 350, "detaching did not keep current position")
 options.nsrtAttachToMap, options.lockFrames = true, true
+
+-- Double row pairs opposite markers; secure targets and missing-macro blockers track each icon.
+SH.Store:ResetDefaultLayout()
+doubleRowCheck:SetChecked(true)
+doubleRowCheck.scripts.OnClick(doubleRowCheck)
+check(options.nsrtDoubleRow and SH.NSRTMacros.frame:GetWidth() == 180 and SH.NSRTMacros.frame:GetHeight() == 166, "double row toggle did not resize panel")
+local topMarkers, bottomMarkers = {2, 7, 3}, {6, 4, 1}
+for _, scale in ipairs({0.5, 1, 2}) do
+    options.roomMapScale = scale
+    SH.NSRTMacros:ApplyScale()
+    local appliedScale = scale * SH.Const.FRAME_SCALE_BASE
+    for column = 1, 3 do
+        check(SH.NSRTMacros.markerIDs[column + 3] == topMarkers[column], "top-row marker order incorrect")
+        check(SH.NSRTMacros.markerIDs[column] == bottomMarkers[column], "bottom-row marker order incorrect")
+        local top, bottom = SH.NSRTMacros.frame.slots[column + 3], SH.NSRTMacros.frame.slots[column]
+        check(top.point[2] == bottom.point[2] and top.point[3] > bottom.point[3], "opposite markers are not vertically paired")
+    end
+    for index, slot in ipairs(SH.NSRTMacros.frame.slots) do
+        local target = SH.NSRTMacros.secureFrame.buttons[index]
+        check(target.point[2] == slot.point[2] * appliedScale and target.point[3] == slot.point[3] * appliedScale, "double-row secure button missed its icon")
+        check(slot.blocker.point[2] == slot.point[2] and slot.blocker.point[3] == slot.point[3], "double-row missing-macro blocker missed its icon")
+        check(target:GetWidth() == slot:GetWidth() * appliedScale and target:GetHeight() == slot:GetHeight() * appliedScale, "scaled secure target size incorrect")
+        check(target.attributes.macro == "NSRT_SSZORAK_" .. SH.NSRTMacros.markerIDs[index], "double row changed macro binding")
+    end
+end
+local customMacroLayout = {8, 1, 2, 3, 4, 5, 6, 7}
+SH.Store:SetTemporaryLayout(customMacroLayout, "Caller")
+SH.NSRTMacros:RefreshLayout()
+for column = 1, 3 do
+    check(SH.NSRTMacros.markerIDs[column] == customMacroLayout[column + 1]
+        and SH.NSRTMacros.markerIDs[column + 3] == customMacroLayout[column + 5], "double row ignored custom marker layout")
+end
+SH.Store:ClearTemporaryLayout()
+SH.NSRTMacros:RefreshLayout()
+combat = true
+doubleRowCheck:SetChecked(false)
+doubleRowCheck.scripts.OnClick(doubleRowCheck)
+check(SH.NSRTMacros.frame:GetWidth() == 180 and SH.NSRTMacros.doubleRow, "combat toggle moved macro targets immediately")
+combat = false
+for _, callback in ipairs(handlers.PLAYER_REGEN_ENABLED) do callback() end
+check(SH.NSRTMacros.frame:GetWidth() == 348 and SH.NSRTMacros.frame:GetHeight() == 100 and not SH.NSRTMacros.doubleRow, "queued single-row layout was not restored")
+for index, slot in ipairs(SH.NSRTMacros.frame.slots) do
+    check(slot.point[2] == 10 + (index - 1) * 56 and slot.point[3] == 8, "single-row icon order was not restored")
+end
+options.roomMapScale = 1
+SH.NSRTMacros:ApplyScale()
+
+-- Reproduce the configuration sequence: Preview, Double Row, then detach and drag.
+options.previewFrames, options.showNSRTMacros, options.lockFrames = true, true, false
+SH.NSRTMacros.panelHidden = false
+SH.OptionsUI:Show()
+SH.Encounter:RefreshDisplays()
+doubleRowCheck:SetChecked(true)
+doubleRowCheck.scripts.OnClick(doubleRowCheck)
+local beforeDetachX, beforeDetachY = SH.NSRTMacros.frame:GetCenter()
+attachToMapCheck:SetChecked(false)
+attachToMapCheck.scripts.OnClick(attachToMapCheck)
+check(SH.NSRTMacros.frame:IsShown() and SH.NSRTMacros.secureFrame:IsShown(), "detached double-row preview disappeared")
+check(SH.NSRTMacros.frame.point[4] == beforeDetachX and SH.NSRTMacros.frame.point[5] == beforeDetachY, "detached preview jumped to an old saved position")
+local strataOrder = {HIGH = 1, FULLSCREEN_DIALOG = 2, TOOLTIP = 3}
+check(strataOrder[SH.NSRTMacros.frame:GetFrameStrata()] > strataOrder[SH.OptionsUI.frame:GetFrameStrata()], "Configuration covers detached preview")
+check(SH.NSRTMacros.frame:GetFrameStrata() == SH.NSRTMacros.secureFrame:GetFrameStrata(), "preview clicks and icons use different layers")
+dragHandle.scripts.OnDragStart()
+check(SH.NSRTMacros.frame.moving, "detached preview could not be dragged with Configuration open")
+dragHandle.scripts.OnDragStop()
+check(SH.NSRTMacros.frame:GetHeight() == 166 and rawget(SH.NSRTMacros.frame, "status") == nil, "preview still reserves space for status text")
+combat = true
+options.previewFrames = false
+SH.Encounter:RefreshDisplays()
+check(SH.NSRTMacros.secureFrame:GetFrameStrata() == "TOOLTIP", "preview layer changed during combat")
+combat = false
+for _, callback in ipairs(handlers.PLAYER_REGEN_ENABLED) do callback() end
+check(SH.NSRTMacros.frame:GetFrameStrata() == "HIGH" and SH.NSRTMacros.secureFrame:GetFrameStrata() == "HIGH", "preview layer did not reset after combat")
+options.nsrtDoubleRow, options.nsrtAttachToMap, options.lockFrames = false, true, true
+SH.NSRTMacros:ApplyAttachment()
+SH.NSRTMacros:ApplyScale()
 
 -- Surge previews, timed capture, opaque values, assignment pairs, and cleanup.
 local targets = SH.SurgeTargets
@@ -641,8 +770,7 @@ check(captureTimer.cancelled, "stop did not cancel scheduled capture")
 combat = false
 
 loadModule("UI/RoomMap.lua")
-SH.RoomMap.frame = frame()
-SH.RoomMap.frame.title = frame()
+SH.RoomMap:OnInitialize()
 SH.RoomMap:ApplyScale()
 check(SH.RoomMap.frame.scale == 0.75, "100 percent map scale did not map to old 75 percent")
 
@@ -698,6 +826,50 @@ options.nsrtAutoShow = true
 instanceID = 1
 SH.NSRTMacros:OnZoneChanged()
 check(not SH.RoomMap.frame:IsShown(), "leaving instance retained auto-shown map")
+
+-- Map room automation does not depend on enabling macro buttons.
+instanceID, subzone = 3004, "The Serpent Warren"
+options.showNSRTMacros, options.showRoomMap, options.nsrtAutoShow = false, true, true
+SH.NSRTMacros:OnZoneChanged()
+subzone = "Altar of the Six Winds"
+SH.NSRTMacros:OnZoneChanged()
+check(SH.RoomMap.frame:IsShown() and not SH.NSRTMacros.secureFrame:IsShown(), "disabled NSRT buttons suppressed room map")
+options.showNSRTMacros = true
+SH.NSRTMacros:OnZoneChanged()
+check(SH.NSRTMacros.secureFrame:IsShown(), "re-enabling macros in altar did not restore panel")
+options.showNSRTMacros = false
+SH.NSRTMacros:OnZoneChanged()
+check(SH.RoomMap.frame:IsShown() and not SH.NSRTMacros.secureFrame:IsShown(), "disabling visible macros hid room map")
+subzone = "Pit of Fangs"
+SH.NSRTMacros:OnZoneChanged()
+check(not SH.RoomMap.frame:IsShown(), "disabled macros prevented room map auto-hide")
+subzone = "Altar of the Six Winds"
+combat = true
+SH.NSRTMacros:OnZoneChanged()
+combat = false
+for _, callback in ipairs(handlers.PLAYER_REGEN_ENABLED) do callback() end
+check(SH.RoomMap.frame:IsShown() and not SH.NSRTMacros.secureFrame:IsShown(), "deferred map show required enabled macros")
+instanceID = 1
+SH.NSRTMacros:OnZoneChanged()
+check(not SH.RoomMap.frame:IsShown(), "disabled macros prevented map cleanup on instance exit")
+
+-- The detached double-row panel remains usable with the room map turned off.
+instanceID, subzone = 3004, "Altar of the Six Winds"
+options.showRoomMap, options.showNSRTMacros, options.nsrtDoubleRow = false, true, true
+options.nsrtAttachToMap, options.lockFrames = false, false
+SH.NSRTMacros:ApplyScale()
+SH.NSRTMacros:OnZoneChanged()
+check(not SH.RoomMap.frame:IsShown() and SH.NSRTMacros.secureFrame:IsShown(), "macro-only double-row panel required visible map")
+dragHandle.scripts.OnDragStart()
+check(SH.NSRTMacros.frame.moving, "detached double-row panel could not move without map")
+dragHandle.scripts.OnDragStop()
+
+-- Intermissions keep the room map static and retain wind prompts.
+SH.Encounter:StartIntermission(true)
+check(not SH.RoomMap.frame.scripts.OnUpdate and not SH.RoomMap.StartRotation, "intermission retained map rotation")
+check(SH.Encounter.timers.push2.delay == 8 and SH.Encounter.timers.push3.delay == 18, "rotation removal changed wind prompt timings")
+for _, group in ipairs(SH.RoomMap.frame.groups) do check(group:IsShown(), "intermission hid static room markers") end
+SH.Encounter:CancelTimers()
 
 -- Compile every shipped Lua file, including load-on-demand configuration.
 for _, toc in ipairs({"SszorakHelper.toc", "Options/SszorakHelper_Options.toc"}) do

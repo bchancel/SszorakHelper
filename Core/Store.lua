@@ -15,6 +15,7 @@ local defaults = {
         nsrtPanelOpen = false,
         nsrtAttachToMap = true,
         nsrtAutoShow = false,
+        nsrtDoubleRow = false,
         showSurgeTargets = false,
         receiveNSRT = true,
         previewFrames = false,
@@ -23,7 +24,6 @@ local defaults = {
         orderFrameScale = 1,
         frameBackgroundOpacity = 0.5,
         minimapAngle = 220,
-        rotateMap = true,
         raidWarningSurges = true,
         raidWarningPushes = false,
         personalWarningFontSize = 32,
@@ -147,6 +147,7 @@ function SH.Store:OnInitialize()
     local hadProfiles = type(SszorakHelperDB.layoutProfiles) == "table"
     local legacyLayout = validLayout(SszorakHelperDB.layout) and copy(SszorakHelperDB.layout) or copy(SH.Const.DEFAULT_LAYOUT)
     merge(SszorakHelperDB, copy(defaults))
+    SszorakHelperDB.options.rotateMap = nil
     normalizeProfiles(SszorakHelperDB, legacyLayout, hadProfiles)
     if SszorakHelperDB.temporaryLayout and not validLayout(SszorakHelperDB.temporaryLayout.layout) then
         SszorakHelperDB.temporaryLayout = nil
@@ -171,7 +172,8 @@ function SH.Store:GetTimings(difficultyID, defaultsOnly)
     for _, event in ipairs(events) do seen[event.id] = true end
     -- Keep observed occurrences that are missing from the published schedule.
     for _, event in ipairs(self:Options().observedSchedules[difficultyID] or {}) do
-        if not seen[event.id] then events[#events + 1] = copy(event) end
+        -- Older saved observations can contain the removed rotation timer.
+        if event.kind ~= "rotationStop" and not seen[event.id] then events[#events + 1] = copy(event) end
     end
     SH.Const:SortSchedule(events)
     local saved = not defaultsOnly and self:Options().encounterSchedules[difficultyID]
