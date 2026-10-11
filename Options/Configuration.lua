@@ -41,14 +41,27 @@ local function addToggle(parent, label, x, y, getter, setter)
     end)
     check:SetPoint("RIGHT", -12, 0)
     check:SetChecked(getter())
+    cell.check = check
     UI.optionChecks[#UI.optionChecks + 1] = {check = check, getter = getter}
     return cell
+end
+
+local function toggleTooltip(cell, title, text)
+    cell.tooltipTitle, cell.tooltip = title, text
+    cell.check.tooltipTitle, cell.check.tooltip = title, text
+    cell:EnableMouse(true)
+    for _, target in ipairs({cell, cell.check}) do
+        target:SetScript("OnEnter", function(owner)
+            SH.Widgets:ShowTooltip(owner, cell.tooltip, cell.tooltipTitle)
+        end)
+        target:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
 end
 
 local function makeSection(parent, title, y, height)
     local section = SH.Widgets:Section(parent, title, height)
     section:SetPoint("TOPLEFT", 18, y)
-    section:SetPoint("RIGHT", -18, 0)
+    section:SetPoint("TOPRIGHT", -18, y)
     return section
 end
 
@@ -94,7 +107,7 @@ function UI:Ensure()
     if self.frame then return end
 
     local frame = CreateFrame("Frame", "SszorakHelperOptionsFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(930, 926)
+    frame:SetSize(930, 800)
     frame:SetFrameStrata("FULLSCREEN_DIALOG")
     frame:SetToplevel(true)
     frame:SetClampedToScreen(true)
@@ -123,29 +136,14 @@ function UI:Ensure()
     version:SetPoint("TOPLEFT", 18, -82)
     version:SetTextColor(unpack(SH.Widgets.colors.textMuted))
 
+    local configuration = SH.Widgets:Button(nav, "Configuration", 134, 32, function() UI:SelectPage("configuration") end, "primary")
+    configuration:SetPoint("TOPLEFT", 18, -126)
+    local markerLayout = SH.Widgets:Button(nav, "Marker Layout", 134, 32, function() UI:SelectPage("layout") end, "secondary")
+    markerLayout:SetPoint("TOPLEFT", 18, -166)
     local test = SH.Widgets:Button(nav, "TEST", 134, 34, function() UI:EnterTestMode() end, "primary")
-    test:SetPoint("TOPLEFT", 18, -126)
-    test.tooltip = "Show the encounter frames and open the fake-event controls. Turn off Lock Frames to move them."
-    local publish = SH.Widgets:Button(nav, "Publish Layout", 134, 32, function() SH.Comms:PublishLayout() end, "success")
-    publish:SetPoint("TOPLEFT", 18, -174)
-    publish.tooltip = "Raid leader only. Offers the currently selected layout to other Sszorak Helper users."
-    local resetLayout = SH.Widgets:Button(nav, "Reset Layout", 134, 30, function()
-        if not SH.Store:ResetCurrentLayout() then
-            SH:Print("The Default layout already uses Sszorak Helper's original markers.")
-            return
-        end
-        UI.selectedLayoutPosition = nil
-        UI:RefreshLayoutEditor()
-        SH.LayoutOffer:ApplyLayout()
-    end, "secondary")
-    resetLayout:SetPoint("TOPLEFT", 18, -218)
-    resetLayout.tooltip = "Restore the currently selected layout to Sszorak Helper's original marker arrangement."
-    resetLayout._shEnabledStyle = "secondary"
-
-    local note = SH.Widgets:Label(nav, "Use Preview Frames and turn off Lock Frames to position displays. Turn off Attach to Map to drag NSRT macros separately.")
-    note:SetPoint("TOPLEFT", 18, -278)
-    note:SetWidth(134)
-    note:SetWordWrap(true)
+    test:SetPoint("TOPLEFT", 18, -210)
+    test.tooltipTitle = "Test encounter"
+    test.tooltip = "Show encounter frames and fake-event controls.\n\nTurn off Lock Frames to move the frames."
 
     local close = SH.Widgets:Button(nav, "Close", 134, 30, function() frame:Hide() end, "secondary")
     close:SetPoint("BOTTOMLEFT", 18, 18)
@@ -153,13 +151,10 @@ function UI:Ensure()
     local header = CreateFrame("Frame", nil, frame, "BackdropTemplate")
     header:SetPoint("TOPLEFT", nav, "TOPRIGHT", 0, 0)
     header:SetPoint("TOPRIGHT", -1, -1)
-    header:SetHeight(72)
+    header:SetHeight(56)
     SH.Widgets:ApplyBackdrop(header, SH.Widgets.colors.canvas, SH.Widgets.colors.transparent)
     header.title = SH.Widgets:Text(header, "Configuration", true)
     header.title:SetPoint("TOPLEFT", 24, -20)
-    local hint = SH.Widgets:Label(header, "Account-wide encounter, warning, layout, and frame settings.")
-    hint:SetPoint("TOPLEFT", header.title, "BOTTOMLEFT", 0, -7)
-    hint:SetTextColor(unpack(SH.Widgets.colors.textMuted))
 
     local topClose = SH.Widgets:Button(header, "×", 30, 30, function() frame:Hide() end, "danger")
     topClose:SetPoint("TOPRIGHT", -14, -14)
@@ -169,7 +164,7 @@ function UI:Ensure()
     scroll:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
     scroll:SetPoint("BOTTOMRIGHT", -28, 16)
     local content = CreateFrame("Frame", nil, scroll)
-    content:SetSize(730, 992)
+    content:SetSize(730, 704)
     scroll:SetScrollChild(content)
 
     local options = SH.Store:Options()
@@ -193,11 +188,23 @@ function UI:Ensure()
     addOpacityControl(frameSection, CELL_LEFT, -170, options)
 
     local macros = makeSection(content, "NSRT Macro Buttons", -222, 140)
-    addToggle(macros, "NSRT Macro Buttons", CELL_LEFT, -34, function() return options.showNSRTMacros end, function(v)
+    local macroEnable = addToggle(macros, "NSRT Macro Buttons", CELL_LEFT, -34, function() return options.showNSRTMacros end, function(v)
         options.showNSRTMacros = v
+        UI.createMacrosButton:SetShown(v)
         if v then SH.NSRTMacros.inRoom = nil end
         SH.NSRTMacros:OnZoneChanged()
     end)
+    macroEnable.label:SetWidth(CELL_WIDTH - 152)
+    local entranceExit = addToggle(macros, "Show Entrance / Exit", CELL_RIGHT, -34,
+        function() return options.nsrtShowEntranceExit end,
+        function(v)
+            options.nsrtShowEntranceExit = v
+            SH.NSRTMacros:ApplyScale()
+            SH.NSRTMacros:RefreshLayout()
+        end)
+    self.showEntranceExitToggle = entranceExit.check
+    toggleTooltip(entranceExit, "Show Entrance / Exit",
+        "Add the room's Exit and Entrance markers to the macro panel.\n\nSingle row: Exit, then Entrance at the right.\nDouble row: Exit at the top right, Entrance at the bottom right.\nChanges during combat apply after combat ends.")
     addToggle(macros, "Attach to Map", CELL_LEFT, -68, function() return options.nsrtAttachToMap end, function(v)
         options.nsrtAttachToMap = v
         SH.NSRTMacros:ApplyAttachment()
@@ -212,12 +219,24 @@ function UI:Ensure()
         options.nsrtDoubleRow = v
         SH.NSRTMacros:ApplyScale()
     end)
-    local createMacros = SH.Widgets:Button(macros, "Create NSRT Macros", 174, 24, function()
+    local createMacros = SH.Widgets:Button(macroEnable, "Create", 64, 24, function()
         SH.NSRTMacros:CreateOrRepairMacros()
+        UI.oppositeMacrosToggle:SetChecked(options.nsrtOppositeMacros)
     end, "primary")
-    createMacros:SetPoint("TOPRIGHT", -12, -38)
-    createMacros.tooltip = "Creates or repairs NSRT_SSZORAK_1 through NSRT_SSZORAK_8 using NorthernSky's matching icons and /raid messages. This overwrites macros already using those reserved names."
+    createMacros:SetPoint("RIGHT", macroEnable.check, "LEFT", -8, 0)
+    createMacros:SetShown(options.showNSRTMacros)
+    createMacros.tooltipTitle = "Create macros"
+    createMacros.tooltip = "Create or repair all eight NSRT macros.\nReset each icon to send its own marker.\n\nOverwrites NSRT_SSZORAK_1 through NSRT_SSZORAK_8.\nOut of combat only."
     self.createMacrosButton = createMacros
+    local oppositeMacros = addToggle(macros, "Opposite macros", CELL_RIGHT, -102,
+        function() return options.nsrtOppositeMacros end,
+        function(value)
+            SH.NSRTMacros:CreateOrRepairMacros(value)
+            UI.oppositeMacrosToggle:SetChecked(options.nsrtOppositeMacros)
+        end)
+    toggleTooltip(oppositeMacros, "Opposite macros",
+        "On: Send the opposite marker in the current layout.\nExample: Circle sends Square in Default.\n\nOff: Reset macros so each icon sends itself.\nChanges repair the eight NSRT macros. Out of combat only.")
+    self.oppositeMacrosToggle = oppositeMacros.check
 
     local intermission = makeSection(content, "Intermission Options", -370, 70)
     addToggle(intermission, "Show Push Direction Warning", CELL_LEFT, -34, function() return options.raidWarningPushes end, function(v) options.raidWarningPushes = v end)
@@ -268,31 +287,104 @@ function UI:Ensure()
         self.difficultyGearButtons[difficultyID] = gear
     end
 
-    local layoutSection = makeSection(content, "Marker Layout", -706, 280)
-    local layoutHint = SH.Widgets:Label(layoutSection, "Choose New to edit. Click two positions to swap their markers.")
+    local layoutPage = CreateFrame("Frame", nil, frame)
+    layoutPage:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
+    layoutPage:SetPoint("BOTTOMRIGHT", -28, 16)
+    layoutPage:Hide()
+
+    local profileTitle = SH.Widgets:Label(layoutPage, "Layout profile")
+    profileTitle:SetPoint("TOPLEFT", 18, -10)
+    local selector = SH.Widgets:Button(layoutPage, "", 500, 30, function() UI:ToggleProfileMenu() end, "secondary")
+    selector:SetPoint("TOPLEFT", 18, -31)
+    selector.text:ClearAllPoints()
+    selector.text:SetPoint("LEFT", 12, 0)
+    selector.text:SetWidth(450)
+    selector.text:SetJustifyH("LEFT")
+    selector.text:SetWordWrap(false)
+    local arrowLeft = selector:CreateLine(nil, "OVERLAY")
+    arrowLeft:SetThickness(2)
+    arrowLeft:SetColorTexture(unpack(SH.Widgets.colors.textSecondary))
+    arrowLeft:SetStartPoint("RIGHT", selector, "RIGHT", -20, 3)
+    arrowLeft:SetEndPoint("RIGHT", selector, "RIGHT", -15, -2)
+    local arrowRight = selector:CreateLine(nil, "OVERLAY")
+    arrowRight:SetThickness(2)
+    arrowRight:SetColorTexture(unpack(SH.Widgets.colors.textSecondary))
+    arrowRight:SetStartPoint("RIGHT", selector, "RIGHT", -15, -2)
+    arrowRight:SetEndPoint("RIGHT", selector, "RIGHT", -10, 3)
+
+    local newProfile = SH.Widgets:Button(layoutPage, "New", 54, 30, function() UI:PromptNewProfile() end, "success")
+    newProfile:SetPoint("LEFT", selector, "RIGHT", 8, 0)
+    newProfile.tooltip = "Create a named copy of the currently displayed layout."
+    local renameProfile = SH.Widgets:Button(layoutPage, "Rename", 66, 30, function() UI:PromptRenameProfile() end, "secondary")
+    renameProfile:SetPoint("LEFT", newProfile, "RIGHT", 4, 0)
+    renameProfile._shEnabledStyle = "secondary"
+    local deleteProfile = SH.Widgets:Button(layoutPage, "Delete", 58, 30, function() UI:PromptDeleteProfile() end, "danger")
+    deleteProfile:SetPoint("LEFT", renameProfile, "RIGHT", 4, 0)
+    deleteProfile._shEnabledStyle = "danger"
+
+    local menuDismiss = CreateFrame("Frame", nil, frame)
+    menuDismiss:SetAllPoints(frame)
+    menuDismiss:SetFrameLevel(frame:GetFrameLevel() + 20)
+    menuDismiss:EnableMouse(true)
+    menuDismiss:Hide()
+    menuDismiss:SetScript("OnMouseDown", function(self) self:Hide() end)
+    local menu = CreateFrame("Frame", nil, menuDismiss, "BackdropTemplate")
+    menu:SetPoint("TOPLEFT", selector, "BOTTOMLEFT", 0, -4)
+    menu:SetSize(500, 42)
+    menu:EnableMouse(true)
+    SH.Widgets:ApplyBackdrop(menu, SH.Widgets.colors.canvasAlt, SH.Widgets.colors.borderStrong)
+
+    local temporary = SH.Widgets:Button(menu, "Temporary Raid Layout", 488, 28, function() menuDismiss:Hide() end, "pink")
+    temporary:SetPoint("TOPLEFT", 6, -6)
+    temporary:Hide()
+    temporary.tooltip = "The raid leader's temporary layout is active. Press New to save a permanent copy."
+    self.temporaryProfileButton = temporary
+
+    for index = 1, SH.Store:GetProfileLimit() do
+        local profileIndex = index
+        local button = SH.Widgets:Button(menu, "", 488, 28, function() UI:SelectProfile(profileIndex) end, "secondary")
+        button.text:ClearAllPoints()
+        button.text:SetPoint("LEFT", 10, 0)
+        button.text:SetWidth(468)
+        button.text:SetJustifyH("LEFT")
+        button.text:SetWordWrap(false)
+        self.profileButtons[index] = button
+    end
+
+    local layoutSection = makeSection(layoutPage, "Marker Layout", -80, 594)
+    SH.Widgets:ApplyBackdrop(layoutSection, SH.Widgets.colors.canvasAlt, SH.Widgets.colors.border)
+    local layoutHint = SH.Widgets:Label(layoutSection, "Click two positions to swap their markers.")
     layoutHint:SetPoint("TOPLEFT", 10, -38)
     layoutHint:SetWidth(450)
     layoutHint:SetWordWrap(true)
 
-    local centerX, centerY, radius = 270, -163, 84
+    local roomWidth, roomHeight = 550, 550 * 1380 / 1456
+    local room = CreateFrame("Frame", nil, layoutSection)
+    room:SetSize(roomWidth, roomHeight)
+    room:SetPoint("TOP", layoutSection, "TOP", 0, -60)
+    room.texture = room:CreateTexture(nil, "BACKGROUND")
+    room.texture:SetAllPoints(room)
+    room.texture:SetTexture("Interface\\AddOns\\SszorakHelper_Options\\Media\\MarkerLayoutRoom.tga")
+    -- The original screenshot occupies this region of a power-of-two texture.
+    room.texture:SetTexCoord(0, 1456 / 2048, 0, 1380 / 2048)
+    local positions = {
+        {0.5, 0.125}, {0.7, 0.3}, {0.79, 0.505}, {0.71, 0.72},
+        {0.5, 0.87}, {0.305, 0.715}, {0.235, 0.51}, {0.31, 0.3},
+    }
     for position = 1, 8 do
         local layoutPosition = position
-        local angle = (position - 1) * (math.pi * 2 / 8)
-        local x = centerX + math.sin(angle) * radius
-        local y = centerY + math.cos(angle) * radius
-        local button = CreateFrame("Button", nil, layoutSection, "BackdropTemplate")
-        button:SetSize(72, 58)
-        button:SetPoint("CENTER", layoutSection, "TOPLEFT", x, y)
-        SH.Widgets:ApplyBackdrop(button, SH.Widgets.colors.control, SH.Widgets.colors.border)
+        local point = positions[position]
+        local button = CreateFrame("Button", nil, room, "BackdropTemplate")
+        button:SetSize(56, 56)
+        button:SetPoint("CENTER", room, "TOPLEFT", point[1] * roomWidth, -point[2] * roomHeight)
+        SH.Widgets:ApplyBackdrop(button, SH.Widgets.colors.transparent, SH.Widgets.colors.transparent)
         button.icon = button:CreateTexture(nil, "ARTWORK")
-        button.icon:SetSize(34, 34)
-        if position == SH.Const.EXIT_POSITION or position == SH.Const.ENTRANCE_POSITION then
-            button.icon:SetPoint("TOP", 0, -3)
-        else
-            button.icon:SetPoint("CENTER")
-        end
-        button.label = button:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        button.label:SetPoint("BOTTOM", 0, 3)
+        button.icon:SetSize(40, 40)
+        button.icon:SetPoint("CENTER")
+        button.label = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        button.label:SetPoint("TOP", button, "BOTTOM", 0, -1)
+        button.label:SetShadowColor(0, 0, 0, 1)
+        button.label:SetShadowOffset(1, -1)
         if position == SH.Const.EXIT_POSITION then
             button.label:SetText("Exit")
         elseif position == SH.Const.ENTRANCE_POSITION then
@@ -308,44 +400,27 @@ function UI:Ensure()
         self.layoutButtons[position] = button
     end
 
-    local profileTitle = SH.Widgets:Label(layoutSection, "LAYOUT PROFILES")
-    profileTitle:SetPoint("TOPLEFT", 500, -50)
-    profileTitle:SetTextColor(unpack(SH.Widgets.colors.navigation))
-
-    local temporary = SH.Widgets:Button(layoutSection, "Temporary Raid Layout", 176, 24, function() end, "pink")
-    temporary:SetPoint("TOPLEFT", 500, -69)
-    temporary:Hide()
-    temporary.tooltip = "The raid leader's temporary layout is active. Press New to save a permanent copy."
-    self.temporaryProfileButton = temporary
-
-    for index = 1, SH.Store:GetProfileLimit() do
-        local profileIndex = index
-        local column = (index - 1) % 2
-        local row = math.floor((index - 1) / 2)
-        local button = SH.Widgets:Button(layoutSection, "", 85, 24, function()
-            UI:SelectProfile(profileIndex)
-        end, "secondary")
-        button:SetPoint("TOPLEFT", 500 + (column * 91), -99 - (row * 28))
-        button.text:SetFontObject(GameFontHighlightSmall)
-        button.text:SetWidth(77)
-        self.profileButtons[index] = button
-    end
-
-    local newProfile = SH.Widgets:Button(layoutSection, "New", 54, 24, function() UI:PromptNewProfile() end, "success")
-    newProfile:SetPoint("TOPLEFT", 500, -239)
-    newProfile.tooltip = "Create a named copy of the currently displayed layout."
-    local renameProfile = SH.Widgets:Button(layoutSection, "Rename", 57, 24, function() UI:PromptRenameProfile() end, "secondary")
-    renameProfile:SetPoint("LEFT", newProfile, "RIGHT", 4, 0)
-    renameProfile._shEnabledStyle = "secondary"
-    local deleteProfile = SH.Widgets:Button(layoutSection, "Delete", 57, 24, function() UI:PromptDeleteProfile() end, "danger")
-    deleteProfile:SetPoint("LEFT", renameProfile, "RIGHT", 4, 0)
-    deleteProfile._shEnabledStyle = "danger"
+    local resetLayout = SH.Widgets:Button(layoutPage, "Reset Layout", 122, 32, function()
+        if not SH.Store:ResetCurrentLayout() then
+            SH:Print("The Default layout already uses Sszorak Helper's original markers.")
+            return
+        end
+        UI.selectedLayoutPosition = nil
+        SH.LayoutOffer:ApplyLayout()
+    end, "secondary")
+    resetLayout:SetPoint("TOPRIGHT", layoutSection, "BOTTOMRIGHT", -4, -16)
+    resetLayout.tooltip = "Restore the currently selected layout to Sszorak Helper's original marker arrangement."
+    resetLayout._shEnabledStyle = "secondary"
+    local publish = SH.Widgets:Button(layoutPage, "Publish Layout", 140, 32, function() SH.Comms:PublishLayout() end, "success")
+    publish:SetPoint("RIGHT", resetLayout, "LEFT", -8, 0)
+    publish.tooltip = "Raid leader only. Offers the currently selected layout to other Sszorak Helper users."
 
     self.newProfileButton = newProfile
     self.renameProfileButton = renameProfile
     self.deleteProfileButton = deleteProfile
 
     frame:SetScript("OnMouseDown", function(self) self:Raise() end)
+    frame:SetScript("OnHide", function() menuDismiss:Hide() end)
     frame:RegisterForDrag("LeftButton")
     frame:SetScript("OnDragStart", function(self) if not InCombatLockdown() then self:StartMoving() end end)
     frame:SetScript("OnDragStop", function(self)
@@ -355,10 +430,35 @@ function UI:Ensure()
 
     self.frame = frame
     self.header, self.scroll, self.content = header, scroll, content
+    self.page = "configuration"
+    self.layoutPage, self.layoutSection = layoutPage, layoutSection
+    self.layoutRoom = room
+    self.configurationButton, self.markerLayoutButton = configuration, markerLayout
+    self.profileSelector, self.profileMenu, self.profileMenuDismiss = selector, menu, menuDismiss
     self.publishButton = publish
     self.resetLayoutButton = resetLayout
     self.testButton = test
     self.topCloseButton = topClose
+end
+
+function UI:SelectPage(page)
+    self:Ensure()
+    self.page = page == "layout" and "layout" or "configuration"
+    self.profileMenuDismiss:Hide()
+    self.selectedLayoutPosition = nil
+    local layout = self.page == "layout"
+    self.scroll:SetShown(not layout)
+    self.layoutPage:SetShown(layout)
+    self.header.title:SetText(layout and "Marker Layout" or "Configuration")
+    SH.Widgets:StyleButton(self.configurationButton, layout and "secondary" or "primary")
+    SH.Widgets:StyleButton(self.markerLayoutButton, layout and "primary" or "secondary")
+    self:Refresh()
+end
+
+function UI:ToggleProfileMenu()
+    local open = not self.profileMenuDismiss:IsShown()
+    self:RefreshProfiles()
+    self.profileMenuDismiss:SetShown(open)
 end
 
 function UI:EnsureTimingDialog()
@@ -486,11 +586,6 @@ function UI:SubmitTimings()
     local ok, reason = SH.Store:SaveTimings(dialog.difficultyID, values)
     if not ok then dialog.panel.error:SetText(reason); return end
     dialog:Hide()
-end
-
-local function abbreviatedProfileName(name)
-    name = tostring(name or "")
-    return #name > 12 and (name:sub(1, 9) .. "...") or name
 end
 
 function UI:EnsureNameDialog()
@@ -627,6 +722,7 @@ function UI:PromptDeleteProfile()
 end
 
 function UI:SelectProfile(profileIndex)
+    self.profileMenuDismiss:Hide()
     local profile = SH.Store:GetProfiles()[profileIndex]
     if not profile or not SH.Store:SelectProfile(profile.id) then return end
     self.selectedLayoutPosition = nil
@@ -641,7 +737,9 @@ function UI:RefreshProfiles()
     for index, button in ipairs(self.profileButtons) do
         local profile = profiles[index]
         if profile then
-            button.text:SetText(abbreviatedProfileName(profile.name))
+            button.text:SetText(profile.name)
+            button:ClearAllPoints()
+            button:SetPoint("TOPLEFT", 6, -6 - ((index - 1 + (temporary and 1 or 0)) * 30))
             button.tooltip = profile.id == "default" and "Default factory layout. Press New to create an editable copy." or profile.name
             button:Show()
             SH.Widgets:StyleButton(button, not temporary and profile.id == activeProfileID and "primary" or "secondary")
@@ -652,11 +750,19 @@ function UI:RefreshProfiles()
 
     if temporary then
         local sender = tostring(temporary.sender or "")
-        self.temporaryProfileButton.text:SetText(sender ~= "" and ("Temporary: " .. abbreviatedProfileName(sender)) or "Temporary Raid Layout")
+        local name = sender ~= "" and ("Temporary: " .. sender) or "Temporary Raid Layout"
+        self.temporaryProfileButton.text:SetText(name)
         self.temporaryProfileButton:Show()
+        self.profileSelector.text:SetText(name)
+        self.profileSelector.tooltip = self.temporaryProfileButton.tooltip
+        SH.Widgets:StyleButton(self.profileSelector, "pink")
     else
         self.temporaryProfileButton:Hide()
+        self.profileSelector.text:SetText(SH.Store:GetActiveProfile().name)
+        self.profileSelector.tooltip = "Choose a layout profile. Default is locked; press New to create an editable copy."
+        SH.Widgets:StyleButton(self.profileSelector, "secondary")
     end
+    self.profileMenu:SetHeight(12 + ((#profiles + (temporary and 1 or 0)) * 30))
 
     self.newProfileButton._shEnabledStyle = "success"
     SH.Widgets:SetEnabled(self.newProfileButton, #profiles < SH.Store:GetProfileLimit())
@@ -670,8 +776,8 @@ function UI:StyleLayoutButton(position)
     local button = self.layoutButtons[position]
     if not button then return end
     local selected = self.selectedLayoutPosition == position
-    SH.Widgets:ApplyBackdrop(button, selected and SH.Widgets.colors.accentSoft or SH.Widgets.colors.control,
-        selected and SH.Widgets.colors.accentBright or SH.Widgets.colors.border)
+    SH.Widgets:ApplyBackdrop(button, selected and SH.Widgets.colors.accentSoft or SH.Widgets.colors.transparent,
+        selected and SH.Widgets.colors.accentBright or SH.Widgets.colors.transparent)
 end
 
 function UI:RefreshLayoutEditor()
@@ -679,6 +785,9 @@ function UI:RefreshLayoutEditor()
     local layout = SH.Store:GetLayout()
     for position, button in ipairs(self.layoutButtons) do
         button.icon:SetTexture(markerTexture(layout[position]))
+        if position ~= SH.Const.EXIT_POSITION and position ~= SH.Const.ENTRANCE_POSITION then
+            button.label:SetText(SH.Const:MarkerName(layout[position]))
+        end
         self:StyleLayoutButton(position)
     end
     self:RefreshProfiles()
@@ -722,6 +831,7 @@ function UI:Refresh()
     self.warningDelaySlider._shUpdating = false
     self.warningDelayLabel:SetText(string.format("Personal Warning Delay: %g s", warningDelay))
     for _, entry in ipairs(self.optionChecks) do entry.check:SetChecked(entry.getter()) end
+    self.createMacrosButton:SetShown(SH.Store:Options().showNSRTMacros)
     for _, entry in ipairs(self.scaleControls) do
         local value = tonumber(entry.getter()) or 1
         entry.slider._shUpdating = true

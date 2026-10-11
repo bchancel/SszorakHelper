@@ -33,19 +33,26 @@ $mainStage = Join-Path $buildRoot "SszorakHelper"
 $optionsStage = Join-Path $buildRoot "SszorakHelper_Options"
 $archivePath = Join-Path $OutputDirectory "SszorakHelper-$version.zip"
 
-function Get-TocEntries {
+function Get-AddonEntries {
     param([string]$Path)
+    $addonRoot = Split-Path -Parent $Path
     return @(
         Get-Content -LiteralPath $Path | ForEach-Object {
             $entry = $_.Trim()
             if ($entry -and -not $entry.StartsWith('#')) { $entry }
+        }
+        $mediaRoot = Join-Path $addonRoot "Media"
+        if (Test-Path -LiteralPath $mediaRoot -PathType Container) {
+            Get-ChildItem -LiteralPath $mediaRoot -File -Recurse | ForEach-Object {
+                $_.FullName.Substring($addonRoot.Length + 1)
+            }
         }
     )
 }
 
 function Copy-TocPayload {
     param([string]$TocPath, [string]$SourceRoot, [string]$DestinationRoot)
-    foreach ($entry in Get-TocEntries -Path $TocPath) {
+    foreach ($entry in Get-AddonEntries -Path $TocPath) {
         $relativePath = $entry -replace '[\\/]', [System.IO.Path]::DirectorySeparatorChar
         $source = Join-Path $SourceRoot $relativePath
         $destination = Join-Path $DestinationRoot $relativePath
@@ -102,9 +109,9 @@ try {
 
     $expected = @(
         "SszorakHelper/SszorakHelper.toc"
-        Get-TocEntries -Path $mainToc | ForEach-Object { "SszorakHelper/$($_.Replace('\', '/'))" }
+        Get-AddonEntries -Path $mainToc | ForEach-Object { "SszorakHelper/$($_.Replace('\', '/'))" }
         "SszorakHelper_Options/SszorakHelper_Options.toc"
-        Get-TocEntries -Path $optionsToc | ForEach-Object { "SszorakHelper_Options/$($_.Replace('\', '/'))" }
+        Get-AddonEntries -Path $optionsToc | ForEach-Object { "SszorakHelper_Options/$($_.Replace('\', '/'))" }
     ) | Sort-Object
     $differences = @(Compare-Object -ReferenceObject $expected -DifferenceObject $actual)
     if ($differences.Count -gt 0) {

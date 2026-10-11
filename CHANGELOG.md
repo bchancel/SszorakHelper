@@ -1,3 +1,13 @@
+## 12.1.5
+
+- Move Marker Layout to its own sidebar page with layout profiles, Publish Layout, and Reset Layout.
+- Add a room background with clickable markers positioned over the room floor.
+- Add an Opposite macros toggle that sends the marker across the room, supports custom and temporary layouts, and shows an active-mode notice. Turn it off to restore normal macros.
+- Add Show Entrance / Exit: Exit and Entrance fill slots 7 and 8 in a single row, or the last column with Exit above Entrance in Double Row. Changes during combat apply after combat ends.
+- Move the compact Create button beside the NSRT enable toggle and show it only when enabled. It creates or repairs macros and restores normal marker behavior.
+- Make hover help easier to read with wrapped text, headings, examples, and reset instructions.
+- Fix the layout profile dropdown arrow and remove extra sidebar and header text.
+
 ## 12.1.4
 
 - Added an optional Double Row layout for NSRT macros, with opposite markers aligned vertically.

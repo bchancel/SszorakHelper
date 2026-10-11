@@ -3,6 +3,7 @@ local _, SH = ...
 SH.NSRTMacros = {
     initializeOrder = 35,
     markerIDs = {},
+    sentMarkerIDs = {},
     available = {},
     expected = nil,
     nextStep = 1,
@@ -11,18 +12,25 @@ SH.modules.NSRTMacros = SH.NSRTMacros
 
 local PANEL_WIDTH = 348
 local PANEL_HEIGHT = 100
+local OPPOSITE_NOTICE_HEIGHT = 34
 local SLOT_WIDTH = 48
 local SLOT_HEIGHT = 58
 local SLOT_GAP = 8
 local SLOT_START_X = 10
 local MACRO_ICONS = {"137001", "137002", "137003", "137004", "137005", "137006", "137007", "137008"}
-local MACRO_POSITIONS = {2, 3, 4, 6, 7, 8}
+local MACRO_POSITIONS = {2, 3, 4, 6, 7, 8, SH.Const.EXIT_POSITION, SH.Const.ENTRANCE_POSITION}
 
 local function slotPoint(slotIndex, doubleRow)
-    local columns = doubleRow and 3 or 6
-    local column = (slotIndex - 1) % columns
+    local column = slotIndex - 1
     -- Keep bindings stable: the left-side markers (slots 4-6) sit above their opposites.
-    local row = doubleRow and slotIndex > 3 and 1 or 0
+    local row = 0
+    if doubleRow then
+        if slotIndex > 6 then
+            column, row = 3, slotIndex == 7 and 1 or 0
+        else
+            column, row = (slotIndex - 1) % 3, slotIndex > 3 and 1 or 0
+        end
+    end
     return SLOT_START_X + column * (SLOT_WIDTH + SLOT_GAP), 8 + row * (SLOT_HEIGHT + SLOT_GAP)
 end
 
@@ -105,7 +113,7 @@ function SH.NSRTMacros:SetPanelOpen(open)
     if InCombatLockdown() then SH:Print("Panel visibility will change after combat ends.") end
 end
 
-function SH.NSRTMacros:CreateOrRepairMacros()
+function SH.NSRTMacros:CreateOrRepairMacros(opposite)
     if InCombatLockdown() then
         SH:Print("NSRT macros cannot be created or repaired during combat.")
         return false
@@ -128,6 +136,10 @@ function SH.NSRTMacros:CreateOrRepairMacros()
         end
     end
 
+    if failed == 0 then
+        SH.Store:Options().nsrtOppositeMacros = opposite == true
+        self:ApplyScale()
+    end
     self:RefreshLayout()
     self:RefreshHighlights()
     if failed > 0 then
@@ -135,6 +147,7 @@ function SH.NSRTMacros:CreateOrRepairMacros()
         return false
     end
     SH:Print(string.format("All 8 NSRT Sszorak macros are ready (%d created, %d repaired).", created, repaired))
+    SH:Print(opposite and "Opposite Macros. RESET to revert." or "Macro panel reset: each marker sends itself.")
     return true
 end
 
@@ -166,6 +179,12 @@ function SH.NSRTMacros:OnInitialize()
     frame.title:SetPoint("TOPLEFT", 10, -7)
     frame.title:SetTextColor(unpack(SH.Widgets.colors.navigation))
 
+    frame.oppositeNotice = SH.Widgets:Label(frame, "Opposite Macros. RESET to revert.")
+    frame.oppositeNotice:SetPoint("TOPLEFT", 10, -28)
+    frame.oppositeNotice:SetWordWrap(true)
+    frame.oppositeNotice:SetTextColor(unpack(SH.Widgets.colors.pinkBorder))
+    frame.oppositeNotice:Hide()
+
     frame.slots = {}
     secure.buttons = {}
     local hide = SH.Widgets:Button(frame, "Hide", 54, 22, function()
@@ -173,7 +192,8 @@ function SH.NSRTMacros:OnInitialize()
     end, "secondary")
     hide:SetPoint("TOPRIGHT", -10, -3)
     hide:SetFrameLevel(secure:GetFrameLevel() + 10)
-    hide.tooltip = "Hide this macro panel. Reopen with /sh macros or right-click the minimap button. During combat, hiding waits until combat ends."
+    hide.tooltipTitle = "Hide macro panel"
+    hide.tooltip = "Reopen with /sh macros or right-click the minimap button.\n\nDuring combat, hiding waits until combat ends."
 
     for slotIndex = 1, #MACRO_POSITIONS do
         local index = slotIndex
@@ -199,9 +219,7 @@ function SH.NSRTMacros:OnInitialize()
         slot.blocker:SetFrameLevel(120)
         slot.blocker:EnableMouse(true)
         slot.blocker:SetScript("OnEnter", function()
-            GameTooltip:SetOwner(slot.blocker, "ANCHOR_RIGHT")
-            GameTooltip:SetText("Create or repair the NSRT macros in Configuration before combat.")
-            GameTooltip:Show()
+            SH.Widgets:ShowTooltip(slot.blocker, "Use Create in Configuration before combat.", "NSRT macro unavailable")
         end)
         slot.blocker:SetScript("OnLeave", function() GameTooltip:Hide() end)
         frame.slots[slotIndex] = slot
@@ -215,9 +233,16 @@ function SH.NSRTMacros:OnInitialize()
             if mouseButton == "LeftButton" and not down then SH.NSRTMacros:OnMacroClicked(index) end
         end)
         button:SetScript("OnEnter", function()
-            local markerID = SH.NSRTMacros.markerIDs[index]
+            local markerID = SH.NSRTMacros.sentMarkerIDs[index]
+            local displayID = SH.NSRTMacros.markerIDs[index]
             GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
             GameTooltip:SetText(markerID and ("Run " .. macroName(markerID)) or "NSRT macro")
+            if index > 6 then
+                GameTooltip:AddLine(index == 7 and "Exit" or "Entrance", 1, 1, 1, true)
+            end
+            if markerID and displayID and markerID ~= displayID then
+                GameTooltip:AddLine(SH.Const:MarkerName(displayID) .. " sends " .. SH.Const:MarkerName(markerID))
+            end
             GameTooltip:Show()
         end)
         button:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -243,9 +268,9 @@ function SH.NSRTMacros:OnInitialize()
         SH.NSRTMacros:RefreshVisibility()
     end)
     SH:RegisterEvent("PLAYER_REGEN_ENABLED", function()
-        SH.NSRTMacros:RefreshLayout()
         SH.NSRTMacros:ApplyAttachment()
         SH.NSRTMacros:ApplyScale()
+        SH.NSRTMacros:RefreshLayout()
         SH.NSRTMacros:OnZoneChanged()
     end)
 end
@@ -298,15 +323,24 @@ function SH.NSRTMacros:ApplyScale()
         return
     end
     self.doubleRow = SH.Store:Options().nsrtDoubleRow == true
-    local width = self.doubleRow and (SLOT_START_X * 2 + SLOT_WIDTH * 3 + SLOT_GAP * 2) or PANEL_WIDTH
+    self.showEntranceExit = SH.Store:Options().nsrtShowEntranceExit == true
+    local columns = self.doubleRow and (self.showEntranceExit and 4 or 3) or (self.showEntranceExit and 8 or 6)
+    local width = SLOT_START_X * 2 + SLOT_WIDTH * columns + SLOT_GAP * (columns - 1)
+    local opposite = SH.Store:Options().nsrtOppositeMacros == true
     local height = PANEL_HEIGHT + (self.doubleRow and (SLOT_HEIGHT + SLOT_GAP) or 0)
+        + (opposite and OPPOSITE_NOTICE_HEIGHT or 0)
     self.frame:SetSize(width, height)
+    self.frame.oppositeNotice:SetWidth(width - 20)
+    self.frame.oppositeNotice:SetShown(opposite)
     self.frame:SetScale(scale)
     self.secureFrame:SetScale(1)
     self.secureFrame:SetSize(width * scale, height * scale)
     for slotIndex, button in ipairs(self.secureFrame.buttons) do
         local x, y = slotPoint(slotIndex, self.doubleRow)
         local slot = self.frame.slots[slotIndex]
+        local shown = slotIndex <= 6 or self.showEntranceExit
+        slot:SetShown(shown)
+        button:SetShown(shown)
         slot:ClearAllPoints()
         slot:SetPoint("BOTTOMLEFT", x, y)
         slot.blocker:ClearAllPoints()
@@ -338,16 +372,20 @@ function SH.NSRTMacros:RefreshLayout()
         return
     end
     local layout = SH.Store:GetLayout()
+    local opposite = SH.Store:Options().nsrtOppositeMacros == true
     local simulate = SH.Encounter and SH.Encounter.testMode and not IsInRaid()
     self.simulateClicks = simulate
     for slotIndex, position in ipairs(MACRO_POSITIONS) do
+        local shown = slotIndex <= 6 or self.showEntranceExit
         local markerID = tonumber(layout[position])
-        local name = markerID and macroName(markerID)
+        local sentMarkerID = tonumber(layout[opposite and SH.Const:Opposite(position) or position])
+        local name = sentMarkerID and macroName(sentMarkerID)
         local macroBody
         if name then macroBody = select(3, GetMacroInfo(name)) end
-        local found = type(macroBody) == "string" and strtrim(macroBody) == ("/raid " .. tostring(markerID))
+        local found = shown and type(macroBody) == "string" and strtrim(macroBody) == ("/raid " .. tostring(sentMarkerID))
         self.markerIDs[slotIndex] = markerID
-        self.available[slotIndex] = found or simulate
+        self.sentMarkerIDs[slotIndex] = sentMarkerID
+        self.available[slotIndex] = shown and (found or simulate)
         self.frame.slots[slotIndex].icon:SetTexture(markerTexture(markerID or 8))
         self.frame.slots[slotIndex].icon:SetAlpha(self.available[slotIndex] and 1 or 0.3)
         local button = self.secureFrame.buttons[slotIndex]
@@ -372,10 +410,10 @@ function SH.NSRTMacros:OnMacroClicked(slotIndex)
     -- In a raid, only the actual chat event supplies the received message.
     -- Without raid recipients, exercise that same receiver locally.
     if self.simulateClicks and SH.Encounter.testMode and not IsInRaid() then
-        SH.Comms:OnRaidMessage(tostring(self.markerIDs[slotIndex]))
+        SH.Comms:OnRaidMessage(tostring(self.sentMarkerIDs[slotIndex]))
     end
     if not self.available[slotIndex] or not self.expected or self.nextStep > 3 then return end
-    if self.markerIDs[slotIndex] ~= self.expected[self.nextStep] then return end
+    if self.sentMarkerIDs[slotIndex] ~= self.expected[self.nextStep] then return end
     self.nextStep = self.nextStep + 1
     self:RefreshHighlights()
 end
@@ -389,7 +427,7 @@ function SH.NSRTMacros:RefreshHighlights()
     end
 
     for slotIndex, slot in ipairs(self.frame.slots) do
-        local order = orderByMarker[self.markerIDs[slotIndex]]
+        local order = orderByMarker[self.sentMarkerIDs[slotIndex]]
         if order then
             slot.badge.text:SetText(tostring(order))
             slot.badge:Show()
@@ -402,7 +440,7 @@ function SH.NSRTMacros:RefreshHighlights()
             isNext and SH.Widgets.colors.pink or (completed and SH.Widgets.colors.success or SH.Widgets.colors.control),
             isNext and SH.Widgets.colors.pinkBorder or (completed and SH.Widgets.colors.successBorder or SH.Widgets.colors.border))
         -- Suggestions are visual only. Keep working macros clickable for retries.
-        slot.blocker:SetShown(not self.available[slotIndex])
+        slot.blocker:SetShown(slot:IsShown() and not self.available[slotIndex])
     end
 end
 

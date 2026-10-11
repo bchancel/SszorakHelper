@@ -36,6 +36,16 @@ C_ChatInfo = {
     RegisterAddonMessagePrefix = noop,
 }
 GetMacroInfo = function(name) if macros[name] then return name, 1, macros[name] end end
+CreateMacro = function(name, icon, body)
+    check(not combat, "created macro in combat")
+    macros[name] = body
+    return tonumber(name:match("(%d+)$"))
+end
+EditMacro = function(name, newName, icon, body)
+    check(not combat, "edited macro in combat")
+    macros[newName] = body
+    return tonumber(newName:match("(%d+)$"))
+end
 C_Timer = {
     NewTimer = function(delay, callback) return {delay = delay, callback = callback, Cancel = function(t) t.cancelled = true end} end,
     After = noop,
@@ -205,14 +215,16 @@ check(SH.Comms.receivedCount == 0, "received batch survived encounter")
 for i = 1, 8 do macros["NSRT_SSZORAK_" .. i] = "/raid " .. i end
 SH.NSRTMacros:RefreshLayout()
 SH.NSRTMacros:SetOrder({6, 4, 2, 5})
-check(#SH.NSRTMacros.secureFrame.buttons == 6, "macro panel must contain only six side buttons")
-for _, markerID in ipairs(SH.NSRTMacros.markerIDs) do
+check(#SH.NSRTMacros.secureFrame.buttons == 8, "optional secure buttons were not prepared before combat")
+for index = 1, 6 do
+    local markerID = SH.NSRTMacros.markerIDs[index]
     check(markerID ~= SH.Store:GetLayout()[SH.Const.EXIT_POSITION], "exit macro appeared on panel")
     check(markerID ~= SH.Store:GetLayout()[SH.Const.ENTRANCE_POSITION], "entrance macro appeared on panel")
 end
 for i, button in ipairs(SH.NSRTMacros.secureFrame.buttons) do
     check(button.attributes.useOnKeyDown == false, "click depends on user CVar")
-    check(button.attributes.type == "macro", "live macro not bound")
+    check(button.attributes.type == (i <= 6 and "macro" or nil), "live macro visibility disagrees with its binding")
+    check(button:IsShown() == (i <= 6) and SH.NSRTMacros.frame.slots[i]:IsShown() == (i <= 6), "Entrance / Exit did not default to hidden")
     check(not SH.NSRTMacros.frame.slots[i].blocker:IsShown(), "available macro blocked")
 end
 SH.NSRTMacros:TogglePanel()
@@ -432,6 +444,8 @@ SH.Encounter:Stop()
 
 -- Build actual option widgets; drafts, invalid input, defaults, and every difficulty gear.
 _G.SszorakHelper = SH
+loadModule("UI/LayoutOffer.lua")
+SH.LayoutOffer:OnInitialize()
 loadModule("Options/Configuration.lua")
 SH.OptionsUI:Ensure()
 check(SH.OptionsUI.header:GetParent() == SH.OptionsUI.frame, "configuration header is inside scrolling content")
@@ -441,12 +455,73 @@ check(SH.OptionsUI.content:GetParent() == SH.OptionsUI.scroll, "options content 
 local headerPoint, closePoint = SH.OptionsUI.header.point, SH.OptionsUI.topCloseButton.point
 SH.OptionsUI.scroll:SetVerticalScroll(150)
 check(SH.OptionsUI.header.point == headerPoint and SH.OptionsUI.topCloseButton.point == closePoint, "scrolling moved the fixed header")
-local doubleRowCheck, attachToMapCheck
+
+-- The Marker Layout page supports the full profile workflow through its toolbar.
+local ui = SH.OptionsUI
+ui:Show()
+ui.markerLayoutButton.scripts.OnClick(ui.markerLayoutButton)
+check(ui.layoutPage:IsShown() and not ui.scroll:IsShown() and ui.header.title:GetText() == "Marker Layout", "Marker Layout navigation did not switch pages")
+check(ui.publishButton:GetParent() == ui.layoutPage and ui.resetLayoutButton:GetParent() == ui.layoutPage, "layout actions stayed on the sidebar")
+check(ui.profileSelector.text:GetText() == "Default" and not ui.resetLayoutButton:IsEnabled(), "Default profile is not protected")
+ui.layoutButtons[2].scripts.OnClick()
+check(ui.selectedLayoutPosition == nil, "Default layout became editable")
+ui.newProfileButton.scripts.OnClick(ui.newProfileButton)
+ui.nameDialog.panel.edit:SetText("My full layout name")
+ui:SubmitProfileName()
+local toolbarProfileID = SH.Store:GetActiveProfileID()
+check(ui.profileSelector.text:GetText() == "My full layout name", "toolbar truncated the profile name")
+ui.renameProfileButton.scripts.OnClick(ui.renameProfileButton)
+ui.nameDialog.panel.edit:SetText("Renamed raid layout")
+ui:SubmitProfileName()
+check(ui.profileSelector.text:GetText() == "Renamed raid layout", "renamed profile did not refresh the selector")
+ui.layoutButtons[2].scripts.OnClick()
+ui.layoutButtons[6].scripts.OnClick()
+check(SH.Store:GetLayout()[2] == 2 and SH.NSRTMacros.markerIDs[1] == 2, "toolbar layout swap did not reach the macro panel")
+check(ui.layoutButtons[2].label:GetText() == "Circle", "swapped marker label did not refresh")
+ui.resetLayoutButton.scripts.OnClick(ui.resetLayoutButton)
+check(SH.Store:GetLayout()[2] == 6 and SH.NSRTMacros.markerIDs[1] == 6, "layout reset did not restore the selected profile")
+local toolbarProfiles = {toolbarProfileID}
+while #SH.Store:GetProfiles() < SH.Store:GetProfileLimit() do
+    toolbarProfiles[#toolbarProfiles + 1] = assert(SH.Store:CreateProfile("Layout " .. #SH.Store:GetProfiles()))
+end
+ui:RefreshLayoutEditor()
+ui.profileSelector.scripts.OnClick(ui.profileSelector)
+check(ui.profileMenuDismiss:IsShown() and ui.profileButtons[10]:IsShown() and not ui.newProfileButton:IsEnabled(), "profile selector lost the ten-profile limit")
+ui.profileButtons[2].scripts.OnClick(ui.profileButtons[2])
+check(not ui.profileMenuDismiss:IsShown() and SH.Store:GetActiveProfileID() == toolbarProfileID, "dropdown did not select and close")
+check(SH.Store:SetTemporaryLayout({8, 1, 2, 3, 4, 5, 6, 7}, "RaidLeader"), "temporary test layout rejected")
+SH.LayoutOffer:ApplyLayout()
+check(ui.profileSelector.text:GetText() == "Temporary: RaidLeader" and ui.profileSelector._shStyle == "pink", "temporary layout is missing from the selector")
+check(not ui.renameProfileButton:IsEnabled() and not ui.deleteProfileButton:IsEnabled(), "temporary layout enabled permanent profile management")
+ui.profileSelector.scripts.OnClick(ui.profileSelector)
+ui.profileButtons[1].scripts.OnClick(ui.profileButtons[1])
+check(not SH.Store:HasTemporaryLayout() and ui.profileSelector.text:GetText() == "Default", "selecting Default did not leave temporary layout")
+for _, profileID in ipairs(toolbarProfiles) do check(SH.Store:DeleteProfile(profileID), "toolbar test profile cleanup failed") end
+ui:RefreshLayoutEditor()
+ui.profileSelector.scripts.OnClick(ui.profileSelector)
+ui.configurationButton.scripts.OnClick(ui.configurationButton)
+check(ui.scroll:IsShown() and not ui.layoutPage:IsShown() and not ui.profileMenuDismiss:IsShown(), "returning to Configuration left the layout or menu open")
+check(ui.header.title:GetText() == "Configuration", "Configuration title was not restored")
+
+local doubleRowCheck, attachToMapCheck, macroEnableCheck
 for _, entry in ipairs(SH.OptionsUI.optionChecks) do
     if entry.check:GetParent().label:GetText() == "Double Row" then doubleRowCheck = entry.check end
     if entry.check:GetParent().label:GetText() == "Attach to Map" then attachToMapCheck = entry.check end
+    if entry.check:GetParent().label:GetText() == "NSRT Macro Buttons" then macroEnableCheck = entry.check end
 end
 check(doubleRowCheck and doubleRowCheck:GetParent():GetParent().title:GetText() == "NSRT MACRO BUTTONS", "double row toggle is missing from NSRT section")
+check(ui.createMacrosButton:GetParent() == macroEnableCheck:GetParent(), "Create is outside the macro-enable cell")
+macroEnableCheck:SetChecked(false)
+macroEnableCheck.scripts.OnClick(macroEnableCheck)
+check(not ui.createMacrosButton:IsShown(), "disabling NSRT macros left Create visible")
+macroEnableCheck:SetChecked(true)
+macroEnableCheck.scripts.OnClick(macroEnableCheck)
+check(ui.createMacrosButton:IsShown(), "enabling NSRT macros did not show Create")
+SH.Store:Options().showNSRTMacros = false
+ui:Refresh()
+check(not ui.createMacrosButton:IsShown(), "options refresh left Create visible while disabled")
+SH.Store:Options().showNSRTMacros = true
+ui:Refresh()
 SH.OptionsUI.frame:Show()
 SH.OptionsUI.topCloseButton.scripts.OnClick(SH.OptionsUI.topCloseButton)
 check(not SH.OptionsUI.frame:IsShown(), "fixed close button did not close configuration")
@@ -635,7 +710,7 @@ for _, scale in ipairs({0.5, 1, 2}) do
         check(target.point[2] == slot.point[2] * appliedScale and target.point[3] == slot.point[3] * appliedScale, "double-row secure button missed its icon")
         check(slot.blocker.point[2] == slot.point[2] and slot.blocker.point[3] == slot.point[3], "double-row missing-macro blocker missed its icon")
         check(target:GetWidth() == slot:GetWidth() * appliedScale and target:GetHeight() == slot:GetHeight() * appliedScale, "scaled secure target size incorrect")
-        check(target.attributes.macro == "NSRT_SSZORAK_" .. SH.NSRTMacros.markerIDs[index], "double row changed macro binding")
+        check(target.attributes.macro == (index <= 6 and "NSRT_SSZORAK_" .. SH.NSRTMacros.markerIDs[index] or nil), "double row changed macro binding")
     end
 end
 local customMacroLayout = {8, 1, 2, 3, 4, 5, 6, 7}
@@ -659,6 +734,139 @@ for index, slot in ipairs(SH.NSRTMacros.frame.slots) do
 end
 options.roomMapScale = 1
 SH.NSRTMacros:ApplyScale()
+
+-- Optional room markers occupy the final single-row slots or the last paired column.
+local entranceExitToggle = ui.showEntranceExitToggle
+check(not entranceExitToggle:GetChecked(), "Entrance / Exit starts enabled")
+entranceExitToggle:SetChecked(true)
+entranceExitToggle.scripts.OnClick(entranceExitToggle)
+for _, doubleRow in ipairs({false, true}) do
+    options.nsrtDoubleRow = doubleRow
+    SH.NSRTMacros:ApplyScale()
+    check(SH.NSRTMacros.frame:GetWidth() == (doubleRow and 236 or 460), "Entrance / Exit did not expand panel width")
+    local exitSlot, entranceSlot = SH.NSRTMacros.frame.slots[7], SH.NSRTMacros.frame.slots[8]
+    check(exitSlot.point[2] == (doubleRow and 178 or 346) and exitSlot.point[3] == (doubleRow and 74 or 8), "Exit is not in the final top/single-row slot")
+    check(entranceSlot.point[2] == (doubleRow and 178 or 402) and entranceSlot.point[3] == 8, "Entrance is not in the final bottom/single-row slot")
+    check(SH.NSRTMacros.markerIDs[7] == 5 and SH.NSRTMacros.markerIDs[8] == 8, "Entrance / Exit used the wrong room markers")
+    for index = 7, 8 do
+        local slot, target = SH.NSRTMacros.frame.slots[index], SH.NSRTMacros.secureFrame.buttons[index]
+        check(slot:IsShown() and target:IsShown(), "enabled room marker is hidden")
+        check(target.attributes.macro == "NSRT_SSZORAK_" .. SH.NSRTMacros.markerIDs[index], "room marker is not bound to its macro")
+        check(target.point[2] == slot.point[2] * 0.75 and target.point[3] == slot.point[3] * 0.75, "room-marker secure target missed its icon")
+    end
+end
+combat = true
+entranceExitToggle:SetChecked(false)
+entranceExitToggle.scripts.OnClick(entranceExitToggle)
+check(SH.NSRTMacros.secureFrame.buttons[7]:IsShown() and SH.NSRTMacros.frame:GetWidth() == 236, "combat toggle hid or moved live targets")
+combat = false
+for _, callback in ipairs(handlers.PLAYER_REGEN_ENABLED) do callback() end
+check(SH.NSRTMacros.frame:GetWidth() == 180, "deferred room-marker removal did not shrink panel")
+for index = 7, 8 do
+    local slot, target = SH.NSRTMacros.frame.slots[index], SH.NSRTMacros.secureFrame.buttons[index]
+    check(not slot:IsShown() and not target:IsShown() and not slot.blocker:IsShown(), "disabled room-marker control remained visible")
+    check(not SH.NSRTMacros.available[index] and target.attributes.type == nil and target.attributes.macro == nil, "hidden room marker remained executable")
+end
+combat = true
+entranceExitToggle:SetChecked(true)
+entranceExitToggle.scripts.OnClick(entranceExitToggle)
+check(not SH.NSRTMacros.secureFrame.buttons[7]:IsShown(), "combat toggle immediately enabled a secure target")
+combat = false
+for _, callback in ipairs(handlers.PLAYER_REGEN_ENABLED) do callback() end
+check(SH.NSRTMacros.secureFrame.buttons[7]:IsShown() and SH.NSRTMacros.secureFrame.buttons[7].attributes.macro == "NSRT_SSZORAK_5", "deferred room marker was not shown and bound")
+macros.NSRT_SSZORAK_5 = "/raid unexpected"
+SH.NSRTMacros:RefreshLayout()
+check(SH.NSRTMacros.frame.slots[7].blocker:IsShown() and SH.NSRTMacros.secureFrame.buttons[7].attributes.type == nil, "room marker accepted a modified macro")
+ui.createMacrosButton.scripts.OnClick(ui.createMacrosButton)
+check(not SH.NSRTMacros.frame.slots[7].blocker:IsShown() and SH.NSRTMacros.secureFrame.buttons[7].attributes.type == "macro", "Create did not repair the Exit macro")
+SH.Store:OnInitialize()
+check(SH.Store:Options().nsrtShowEntranceExit, "saved Entrance / Exit setting was lost")
+ui:Refresh()
+check(entranceExitToggle:GetChecked(), "Entrance / Exit toggle lost its saved state")
+
+-- Opposite mode preserves the icons but sends and tracks the opposite room marker.
+local oppositeToggle, resetButton = SH.OptionsUI.oppositeMacrosToggle, SH.OptionsUI.createMacrosButton
+check(resetButton.text:GetText() == "Create", "macro creation action was not renamed")
+check(oppositeToggle.tooltip:find("Circle sends Square", 1, true), "opposite toggle lacks its explanatory tooltip")
+check(not oppositeToggle:GetChecked(), "opposite toggle starts on")
+oppositeToggle:SetChecked(true)
+oppositeToggle.scripts.OnClick(oppositeToggle)
+check(options.nsrtOppositeMacros and oppositeToggle:GetChecked() and SH.NSRTMacros.frame.oppositeNotice:IsShown(), "opposite mode was not enabled")
+check(SH.NSRTMacros.frame.oppositeNotice:GetText() == "Opposite Macros. RESET to revert.", "opposite notice is wrong")
+check(SH.NSRTMacros.markerIDs[4] == 2 and SH.NSRTMacros.secureFrame.buttons[4].attributes.macro == "NSRT_SSZORAK_6", "Circle did not send Square")
+check(SH.NSRTMacros.sentMarkerIDs[7] == 8 and SH.NSRTMacros.sentMarkerIDs[8] == 5, "Opposite mode did not pair Exit and Entrance")
+macros.NSRT_SSZORAK_6 = "/raid unexpected"
+oppositeToggle:SetChecked(false)
+oppositeToggle.scripts.OnClick(oppositeToggle)
+check(not options.nsrtOppositeMacros and not oppositeToggle:GetChecked() and not SH.NSRTMacros.frame.oppositeNotice:IsShown(), "turning off the toggle did not reset opposite mode")
+check(macros.NSRT_SSZORAK_6 == "/raid 6", "turning off the toggle did not repair the macros")
+for index, target in ipairs(SH.NSRTMacros.secureFrame.buttons) do
+    check(target.attributes.macro == "NSRT_SSZORAK_" .. SH.NSRTMacros.markerIDs[index], "turning off the toggle left opposite bindings")
+end
+oppositeToggle:SetChecked(true)
+oppositeToggle.scripts.OnClick(oppositeToggle)
+for _, doubleRow in ipairs({false, true}) do
+    options.nsrtDoubleRow = doubleRow
+    SH.NSRTMacros:ApplyScale()
+    check(SH.NSRTMacros.frame:GetHeight() == (doubleRow and 200 or 134), "opposite notice overlaps macro icons")
+    for index, target in ipairs(SH.NSRTMacros.secureFrame.buttons) do
+        check(target.attributes.macro == "NSRT_SSZORAK_" .. SH.NSRTMacros.sentMarkerIDs[index], "opposite binding disagrees with sent marker")
+    end
+end
+SH.NSRTMacros:SetOrder({6, 4, 1})
+check(SH.NSRTMacros.frame.slots[4].badge.text:GetText() == "1", "opposite suggestion highlights the wrong icon")
+SH.NSRTMacros:OnMacroClicked(4)
+check(SH.NSRTMacros.nextStep == 2, "opposite click did not advance by the sent marker")
+macros.NSRT_SSZORAK_6 = "/raid unexpected"
+SH.NSRTMacros:RefreshLayout()
+check(not SH.NSRTMacros.available[4] and SH.NSRTMacros.frame.slots[4].blocker:IsShown(), "opposite button accepted a modified target macro")
+check(SH.NSRTMacros:CreateOrRepairMacros(true), "opposite macros were not repaired")
+SH.Store:SetTemporaryLayout(customMacroLayout, "Caller")
+SH.NSRTMacros:RefreshLayout()
+for index, position in ipairs(SH.Const.WIND_POSITIONS) do
+    check(SH.NSRTMacros.markerIDs[index] == customMacroLayout[position], "opposite mode changed custom icons")
+    check(SH.NSRTMacros.sentMarkerIDs[index] == customMacroLayout[SH.Const:Opposite(position)], "opposite mode ignored custom room positions")
+end
+check(SH.NSRTMacros.markerIDs[7] == customMacroLayout[1] and SH.NSRTMacros.markerIDs[8] == customMacroLayout[5], "room-marker icons ignored custom layout")
+check(SH.NSRTMacros.sentMarkerIDs[7] == customMacroLayout[5] and SH.NSRTMacros.sentMarkerIDs[8] == customMacroLayout[1], "opposite room markers ignored custom layout")
+SH.Store:ClearTemporaryLayout()
+SH.NSRTMacros:RefreshLayout()
+SH.Store:OnInitialize()
+check(SH.Store:Options().nsrtOppositeMacros, "saved opposite mode was lost on initialization")
+oppositeToggle:SetChecked(false)
+SH.OptionsUI:Refresh()
+check(oppositeToggle:GetChecked(), "options refresh lost the saved opposite state")
+combat = true
+oppositeToggle:SetChecked(false)
+oppositeToggle.scripts.OnClick(oppositeToggle)
+check(options.nsrtOppositeMacros and oppositeToggle:GetChecked(), "combat rejection changed opposite mode or left the toggle off")
+combat = false
+local editMacro = EditMacro
+EditMacro = function() return nil end
+oppositeToggle:SetChecked(false)
+oppositeToggle.scripts.OnClick(oppositeToggle)
+check(options.nsrtOppositeMacros and oppositeToggle:GetChecked(), "failed macro repair changed opposite mode or left the toggle off")
+EditMacro = editMacro
+SH.Encounter.testMode, inRaid = true, false
+SH.NSRTMacros:RefreshLayout()
+SH.Comms.receivedCount, SH.Comms.receivedMarkers = 0, {}
+SH.NSRTMacros:OnMacroClicked(4)
+check(SH.Comms.receivedMarkers[1] == "6", "solo opposite click displayed the visible icon instead of Square")
+SH.NSRTMacros:OnMacroClicked(7)
+SH.NSRTMacros:OnMacroClicked(8)
+check(SH.Comms.receivedMarkers[2] == "8" and SH.Comms.receivedMarkers[3] == "5", "solo opposite room markers sent the wrong sequence")
+SH.Encounter.testMode, inRaid = false, true
+resetButton.scripts.OnClick(resetButton)
+check(not options.nsrtOppositeMacros and not oppositeToggle:GetChecked() and not SH.NSRTMacros.frame.oppositeNotice:IsShown(), "reset did not disable opposite mode and its toggle")
+for index, target in ipairs(SH.NSRTMacros.secureFrame.buttons) do
+    check(target.attributes.macro == "NSRT_SSZORAK_" .. SH.NSRTMacros.markerIDs[index], "reset left opposite bindings")
+end
+options.nsrtDoubleRow = false
+entranceExitToggle:SetChecked(false)
+entranceExitToggle.scripts.OnClick(entranceExitToggle)
+SH.NSRTMacros:ApplyScale()
+SH.NSRTMacros:SetOrder(nil)
+SH.Comms.receivedCount, SH.Comms.receivedMarkers = 0, {}
 
 -- Reproduce the configuration sequence: Preview, Double Row, then detach and drag.
 options.previewFrames, options.showNSRTMacros, options.lockFrames = true, true, false

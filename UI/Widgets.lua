@@ -70,6 +70,20 @@ function SH.Widgets:StyleButton(button, style)
     if button.text then button.text:SetTextColor(unpack(definition[3])) end
 end
 
+function SH.Widgets:ShowTooltip(owner, text, title)
+    if not text then return end
+    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+    if title then
+        GameTooltip:SetText(title, 1, 0.82, 0, 1, true)
+        for line in (text .. "\n"):gmatch("(.-)\n") do
+            GameTooltip:AddLine(line == "" and " " or line, 1, 1, 1, true)
+        end
+    else
+        GameTooltip:SetText(text, 1, 0.82, 0, 1, true)
+    end
+    GameTooltip:Show()
+end
+
 function SH.Widgets:Button(parent, text, width, height, onClick, style)
     local button = CreateFrame("Button", nil, parent, "BackdropTemplate")
     button:SetSize(width or 120, height or 28)
@@ -82,11 +96,7 @@ function SH.Widgets:Button(parent, text, width, height, onClick, style)
         if self:IsEnabled() then
             SH.Widgets:ApplyBackdrop(self, colors.hover, colors.accentBright)
         end
-        if self.tooltip then
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(self.tooltip)
-            GameTooltip:Show()
-        end
+        SH.Widgets:ShowTooltip(self, self.tooltip, self.tooltipTitle)
     end)
     button:SetScript("OnLeave", function(self)
         SH.Widgets:StyleButton(self, self:IsEnabled() and self._shStyle or "disabled")
