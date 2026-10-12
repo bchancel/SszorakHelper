@@ -1,3 +1,11 @@
+## 12.1.6
+
+- Replace Double Row with a Rows dropdown for single, paired, or room-position layouts, preserving existing row settings.
+- Arrange three rows by relative room position, with optional Exit at the top right and Entrance at the middle right.
+- Add optional room keybinds to Marker Layout. Right-click a label beneath a marker to assign a key, including modifiers, middle/side mouse buttons, and mouse wheel.
+- Reject occupied keys with a warning and skip saved keys that later conflict, protecting existing WoW and other addon bindings.
+- Clear individual binds or all Sszorak Helper binds without changing any others. Disabling preserves assignments and releases the keys while inactive.
+
 ## 12.1.5
 
 - Move Marker Layout to its own sidebar page with layout profiles, Publish Layout, and Reset Layout.

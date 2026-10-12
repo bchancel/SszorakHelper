@@ -1,7 +1,7 @@
 local SH = _G.SszorakHelper
 if not SH then return end
 
-local UI = {layoutButtons = {}, optionChecks = {}, profileButtons = {}}
+local UI = {layoutButtons = {}, optionChecks = {}, profileButtons = {}, rowsButtons = {}}
 SH.OptionsUI = UI
 
 local CELL_LEFT = 4
@@ -12,6 +12,19 @@ local OPACITY_VALUES = {0, 0.25, 0.5, 0.75, 1}
 
 local function markerTexture(markerID)
     return string.format("Interface\\TargetingFrame\\UI-RaidTargetingIcon_%d", markerID)
+end
+
+local function dropdownArrow(button)
+    local left = button:CreateLine(nil, "OVERLAY")
+    left:SetThickness(2)
+    left:SetColorTexture(unpack(SH.Widgets.colors.textSecondary))
+    left:SetStartPoint("RIGHT", button, "RIGHT", -20, 3)
+    left:SetEndPoint("RIGHT", button, "RIGHT", -15, -2)
+    local right = button:CreateLine(nil, "OVERLAY")
+    right:SetThickness(2)
+    right:SetColorTexture(unpack(SH.Widgets.colors.textSecondary))
+    right:SetStartPoint("RIGHT", button, "RIGHT", -15, -2)
+    right:SetEndPoint("RIGHT", button, "RIGHT", -10, 3)
 end
 
 local function optionCell(parent, x, y, width)
@@ -204,7 +217,7 @@ function UI:Ensure()
         end)
     self.showEntranceExitToggle = entranceExit.check
     toggleTooltip(entranceExit, "Show Entrance / Exit",
-        "Add the room's Exit and Entrance markers to the macro panel.\n\nSingle row: Exit, then Entrance at the right.\nDouble row: Exit at the top right, Entrance at the bottom right.\nChanges during combat apply after combat ends.")
+        "Add the room's Exit and Entrance markers to the macro panel.\n\n1 row: Exit, then Entrance at the right.\n2 rows: Exit at the top right, Entrance at the bottom right.\n3 rows: Exit at the top right, Entrance at the middle right.\nChanges during combat apply after combat ends.")
     addToggle(macros, "Attach to Map", CELL_LEFT, -68, function() return options.nsrtAttachToMap end, function(v)
         options.nsrtAttachToMap = v
         SH.NSRTMacros:ApplyAttachment()
@@ -215,10 +228,17 @@ function UI:Ensure()
         SH.NSRTMacros.lastSubzone = nil
         SH.NSRTMacros:OnZoneChanged()
     end)
-    addToggle(macros, "Double Row", CELL_LEFT, -102, function() return options.nsrtDoubleRow end, function(v)
-        options.nsrtDoubleRow = v
-        SH.NSRTMacros:ApplyScale()
-    end)
+    local rowsCell = optionCell(macros, CELL_LEFT, -102, CELL_WIDTH)
+    cellLabel(rowsCell, "Rows")
+    local rowsDropdown = SH.Widgets:Button(rowsCell, tostring(SH.Store:GetNSRTRows()), 80, 24,
+        function() UI:ToggleRowsMenu() end, "secondary")
+    rowsDropdown:SetPoint("RIGHT", -12, 0)
+    rowsDropdown.text:ClearAllPoints()
+    rowsDropdown.text:SetPoint("LEFT", 12, 0)
+    dropdownArrow(rowsDropdown)
+    rowsDropdown.tooltipTitle = "Macro rows"
+    rowsDropdown.tooltip = "1: Single row.\n2: Pairs opposite markers in two rows.\n3: Matches your relative room position in three rows.\n\nChanges during combat apply after combat ends."
+    self.rowsDropdown = rowsDropdown
     local createMacros = SH.Widgets:Button(macroEnable, "Create", 64, 24, function()
         SH.NSRTMacros:CreateOrRepairMacros()
         UI.oppositeMacrosToggle:SetChecked(options.nsrtOppositeMacros)
@@ -301,16 +321,7 @@ function UI:Ensure()
     selector.text:SetWidth(450)
     selector.text:SetJustifyH("LEFT")
     selector.text:SetWordWrap(false)
-    local arrowLeft = selector:CreateLine(nil, "OVERLAY")
-    arrowLeft:SetThickness(2)
-    arrowLeft:SetColorTexture(unpack(SH.Widgets.colors.textSecondary))
-    arrowLeft:SetStartPoint("RIGHT", selector, "RIGHT", -20, 3)
-    arrowLeft:SetEndPoint("RIGHT", selector, "RIGHT", -15, -2)
-    local arrowRight = selector:CreateLine(nil, "OVERLAY")
-    arrowRight:SetThickness(2)
-    arrowRight:SetColorTexture(unpack(SH.Widgets.colors.textSecondary))
-    arrowRight:SetStartPoint("RIGHT", selector, "RIGHT", -15, -2)
-    arrowRight:SetEndPoint("RIGHT", selector, "RIGHT", -10, 3)
+    dropdownArrow(selector)
 
     local newProfile = SH.Widgets:Button(layoutPage, "New", 54, 30, function() UI:PromptNewProfile() end, "success")
     newProfile:SetPoint("LEFT", selector, "RIGHT", 8, 0)
@@ -333,6 +344,21 @@ function UI:Ensure()
     menu:SetSize(500, 42)
     menu:EnableMouse(true)
     SH.Widgets:ApplyBackdrop(menu, SH.Widgets.colors.canvasAlt, SH.Widgets.colors.borderStrong)
+
+    local rowsMenu = CreateFrame("Frame", nil, menuDismiss, "BackdropTemplate")
+    rowsMenu:SetPoint("TOPRIGHT", rowsDropdown, "BOTTOMRIGHT", 0, -4)
+    rowsMenu:SetSize(80, 102)
+    rowsMenu:EnableMouse(true)
+    rowsMenu:Hide()
+    SH.Widgets:ApplyBackdrop(rowsMenu, SH.Widgets.colors.canvasAlt, SH.Widgets.colors.borderStrong)
+    for count = 1, 3 do
+        local rows = count
+        local button = SH.Widgets:Button(rowsMenu, tostring(rows), 68, 28,
+            function() UI:SelectRows(rows) end, "secondary")
+        button:SetPoint("TOPLEFT", 6, -6 - (rows - 1) * 30)
+        self.rowsButtons[rows] = button
+    end
+    self.rowsMenu = rowsMenu
 
     local temporary = SH.Widgets:Button(menu, "Temporary Raid Layout", 488, 28, function() menuDismiss:Hide() end, "pink")
     temporary:SetPoint("TOPLEFT", 6, -6)
@@ -397,6 +423,31 @@ function UI:Ensure()
             self:SetBackdropBorderColor(unpack(SH.Widgets.colors.accentBright))
         end)
         button:SetScript("OnLeave", function(self) UI:StyleLayoutButton(layoutPosition) end)
+        local bind = CreateFrame("Button", nil, button)
+        bind:SetSize(110, 18)
+        bind:SetPoint("TOP", button.label, "BOTTOM", 0, -2)
+        bind:RegisterForClicks("RightButtonUp")
+        bind.text = bind:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        bind.text:SetPoint("CENTER")
+        bind.text:SetWidth(104)
+        bind.text:SetWordWrap(false)
+        bind.text:SetShadowColor(0, 0, 0, 1)
+        bind.text:SetShadowOffset(1, -1)
+        bind.line = bind:CreateTexture(nil, "BACKGROUND")
+        bind.line:SetColorTexture(unpack(SH.Widgets.colors.accentBright))
+        bind.line:SetHeight(1)
+        bind.line:SetPoint("BOTTOMLEFT", 8, 0)
+        bind.line:SetPoint("BOTTOMRIGHT", -8, 0)
+        bind:SetScript("OnClick", function(_, mouseButton)
+            if mouseButton == "RightButton" then UI:BeginKeybindCapture(layoutPosition) end
+        end)
+        bind:SetScript("OnEnter", function(owner)
+            SH.Widgets:ShowTooltip(owner,
+                "Right-click to assign or clear this room position's NSRT keybind.\n\nExisting keybinds cannot be replaced. Binds are active while the macro panel is visible.",
+                "Keybind: " .. SH.Keybinds:KeyLabel(SH.Keybinds:Get(layoutPosition)))
+        end)
+        bind:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        button.keybind = bind
         self.layoutButtons[position] = button
     end
 
@@ -415,12 +466,33 @@ function UI:Ensure()
     publish:SetPoint("RIGHT", resetLayout, "LEFT", -8, 0)
     publish.tooltip = "Raid leader only. Offers the currently selected layout to other Sszorak Helper users."
 
+    self.enableKeybindsButton = SH.Widgets:Button(layoutPage, "Enable Keybinds", 148, 32, function()
+        UI:CancelKeybindCapture()
+        local ok, reason = SH.Keybinds:SetEnabled(not SH.Store:Options().nsrtKeybindsEnabled)
+        if not ok then SH:Print(reason) end
+        UI:RefreshKeybindControls()
+    end, "secondary")
+    self.enableKeybindsButton:SetPoint("TOPLEFT", layoutSection, "BOTTOMLEFT", 4, -16)
+    self.enableKeybindsButton.tooltipTitle = "Room keybinds"
+    self.enableKeybindsButton.tooltip = "Enable keybinds for the eight room positions.\nRight-click a bind label under a marker to edit it.\n\nKeys already used by WoW or another addon are blocked. Disabling keeps your assignments."
+    self.clearKeybindsButton = SH.Widgets:Button(layoutPage, "Clear Keybinds", 126, 32, function()
+        UI:CancelKeybindCapture()
+        local ok, reason = SH.Keybinds:ClearAll()
+        if not ok then SH:Print(reason) end
+        UI:RefreshKeybindControls()
+    end, "secondary")
+    self.clearKeybindsButton:SetPoint("LEFT", self.enableKeybindsButton, "RIGHT", 8, 0)
+    self.clearKeybindsButton.tooltip = "Clear only Sszorak Helper's room keybinds. WoW and other addons' bindings are left untouched."
+
     self.newProfileButton = newProfile
     self.renameProfileButton = renameProfile
     self.deleteProfileButton = deleteProfile
 
     frame:SetScript("OnMouseDown", function(self) self:Raise() end)
-    frame:SetScript("OnHide", function() menuDismiss:Hide() end)
+    frame:SetScript("OnHide", function()
+        menuDismiss:Hide()
+        UI:CancelKeybindCapture()
+    end)
     frame:RegisterForDrag("LeftButton")
     frame:SetScript("OnDragStart", function(self) if not InCombatLockdown() then self:StartMoving() end end)
     frame:SetScript("OnDragStop", function(self)
@@ -445,6 +517,7 @@ function UI:SelectPage(page)
     self:Ensure()
     self.page = page == "layout" and "layout" or "configuration"
     self.profileMenuDismiss:Hide()
+    self:CancelKeybindCapture()
     self.selectedLayoutPosition = nil
     local layout = self.page == "layout"
     self.scroll:SetShown(not layout)
@@ -455,10 +528,169 @@ function UI:SelectPage(page)
     self:Refresh()
 end
 
+function UI:RefreshKeybindControls()
+    local enabled = SH.Store:Options().nsrtKeybindsEnabled
+    local editable = not InCombatLockdown()
+    local hasBindings = false
+    for position, button in ipairs(self.layoutButtons) do
+        local key = SH.Keybinds:Get(position)
+        hasBindings = hasBindings or key ~= nil
+        button.keybind.text:SetText(SH.Keybinds:KeyLabel(key))
+        local conflict = key and SH.Keybinds:GetConflict(key, position)
+        button.keybind.text:SetTextColor(unpack(conflict and SH.Widgets.colors.dangerBorder or SH.Widgets.colors.accentBright))
+        button.keybind:SetShown(enabled)
+        button.keybind:SetEnabled(editable)
+    end
+    self.enableKeybindsButton.text:SetText(enabled and "Disable Keybinds" or "Enable Keybinds")
+    self.enableKeybindsButton._shEnabledStyle = enabled and "success" or "secondary"
+    SH.Widgets:SetEnabled(self.enableKeybindsButton, editable)
+    self.clearKeybindsButton._shEnabledStyle = "secondary"
+    SH.Widgets:SetEnabled(self.clearKeybindsButton, editable and hasBindings)
+end
+
+function UI:EnsureKeybindDialog()
+    if self.keybindDialog then return end
+    local shade = CreateFrame("Frame", nil, self.frame, "BackdropTemplate")
+    shade:SetAllPoints(self.frame)
+    shade:SetFrameLevel(self.frame:GetFrameLevel() + 80)
+    shade:EnableMouse(true)
+    shade:EnableMouseWheel(true)
+    shade:EnableKeyboard(true)
+    shade:SetPropagateKeyboardInput(false)
+    shade:Hide()
+    SH.Widgets:ApplyBackdrop(shade, SH.Widgets.colors.overlay, SH.Widgets.colors.transparent)
+    local panel = CreateFrame("Frame", nil, shade, "BackdropTemplate")
+    panel:SetSize(460, 244)
+    panel:SetPoint("CENTER")
+    panel:EnableMouse(true)
+    SH.Widgets:ApplyBackdrop(panel, SH.Widgets.colors.canvasAlt, SH.Widgets.colors.borderStrong)
+    panel.title = SH.Widgets:Text(panel, "", true)
+    panel.title:SetPoint("TOPLEFT", 20, -18)
+    local help = SH.Widgets:Text(panel, "Press a key, optionally with Shift, Ctrl, or Alt.\nMiddle/side mouse buttons and mouse wheel also work.")
+    help:SetPoint("TOPLEFT", 20, -50)
+    help:SetWidth(420)
+    help:SetWordWrap(true)
+    panel.current = SH.Widgets:Label(panel, "")
+    panel.current:SetPoint("TOPLEFT", 20, -92)
+    panel.error = SH.Widgets:Text(panel, "")
+    panel.error:SetPoint("TOPLEFT", 20, -116)
+    panel.error:SetWidth(420)
+    panel.error:SetWordWrap(true)
+    panel.error:SetTextColor(unpack(SH.Widgets.colors.dangerBorder))
+    local hint = SH.Widgets:Label(panel, "Escape: cancel. Backspace/Delete: clear this bind.")
+    hint:SetPoint("TOPLEFT", 20, -170)
+    local clear = SH.Widgets:Button(panel, "Clear Bind", 110, 28, function() UI:AssignCapturedKey(nil) end, "secondary")
+    clear:SetPoint("BOTTOMLEFT", 20, 18)
+    local cancel = SH.Widgets:Button(panel, "Cancel", 110, 28, function() UI:CancelKeybindCapture() end, "secondary")
+    cancel:SetPoint("BOTTOMRIGHT", -20, 18)
+    local modifiers = {SHIFT = true, CTRL = true, ALT = true, LSHIFT = true, RSHIFT = true,
+        LCTRL = true, RCTRL = true, LALT = true, RALT = true, LMETA = true, RMETA = true}
+    shade:SetScript("OnKeyDown", function(_, key)
+        if InCombatLockdown() then UI:CancelKeybindCapture(); return end
+        if key == "ESCAPE" then UI:CancelKeybindCapture()
+        elseif key == "BACKSPACE" or key == "DELETE" then UI:AssignCapturedKey(nil)
+        elseif not modifiers[key] then UI.pendingBindKey = {key, SH.Keybinds:WithModifiers(key)} end
+    end)
+    shade:SetScript("OnKeyUp", function(_, key)
+        local pending = UI.pendingBindKey
+        if pending and pending[1] == key then
+            UI.pendingBindKey = nil
+            UI:AssignCapturedKey(pending[2])
+        end
+    end)
+    local function mouseKey(button)
+        if button == "MiddleButton" then return "BUTTON3" end
+        local number = button:match("^Button(%d+)$")
+        return number and tonumber(number) >= 4 and ("BUTTON" .. number) or nil
+    end
+    local function onMouseDown(_, button)
+        local key = mouseKey(button)
+        if key then UI.pendingBindMouse = {button, SH.Keybinds:WithModifiers(key)} end
+    end
+    local function onMouseUp(_, button)
+        local pending = UI.pendingBindMouse
+        if pending and pending[1] == button then
+            UI.pendingBindMouse = nil
+            UI:AssignCapturedKey(pending[2])
+        end
+    end
+    for _, target in ipairs({shade, panel}) do
+        target:EnableMouseWheel(true)
+        target:SetScript("OnMouseDown", onMouseDown)
+        target:SetScript("OnMouseUp", onMouseUp)
+        target:SetScript("OnMouseWheel", function(_, delta)
+            UI:AssignCapturedKey(SH.Keybinds:WithModifiers(delta > 0 and "MOUSEWHEELUP" or "MOUSEWHEELDOWN"))
+        end)
+    end
+    shade:SetScript("OnHide", function()
+        UI.capturePosition, UI.pendingBindKey, UI.pendingBindMouse = nil, nil, nil
+        SH.Keybinds:EndCapture()
+    end)
+    self.keybindDialog, shade.panel = shade, panel
+end
+
+function UI:BeginKeybindCapture(position)
+    if InCombatLockdown() then SH:Print("Keybinds cannot be changed during combat."); return end
+    if not SH.Store:Options().nsrtKeybindsEnabled then return end
+    self:EnsureKeybindDialog()
+    self.profileMenuDismiss:Hide()
+    self.capturePosition, self.pendingBindKey, self.pendingBindMouse = position, nil, nil
+    self.keybindDialog.panel.title:SetText("Keybind: " .. SH.Const.DIRECTIONS[position])
+    self.keybindDialog.panel.current:SetText("Current: " .. SH.Keybinds:KeyLabel(SH.Keybinds:Get(position)))
+    self.keybindDialog.panel.error:SetText("")
+    GameTooltip:Hide()
+    SH.Keybinds:BeginCapture()
+    self.keybindDialog:Show()
+end
+
+function UI:AssignCapturedKey(key)
+    if not self.capturePosition then return end
+    local ok, reason = SH.Keybinds:Set(self.capturePosition, key)
+    if not ok then
+        self.keybindDialog.panel.error:SetText(reason)
+        SH:Print(reason)
+        return
+    end
+    self:CancelKeybindCapture()
+end
+
+function UI:CancelKeybindCapture()
+    if self.keybindDialog and self.keybindDialog:IsShown() then
+        self.keybindDialog:Hide()
+    end
+end
+
 function UI:ToggleProfileMenu()
-    local open = not self.profileMenuDismiss:IsShown()
+    local open = not (self.profileMenuDismiss:IsShown() and self.profileMenu:IsShown())
     self:RefreshProfiles()
+    self.rowsMenu:Hide()
+    self.profileMenu:Show()
     self.profileMenuDismiss:SetShown(open)
+end
+
+function UI:RefreshRowsControl()
+    local rows = SH.Store:GetNSRTRows()
+    self.rowsDropdown.text:SetText(tostring(rows))
+    for count, button in ipairs(self.rowsButtons) do
+        SH.Widgets:StyleButton(button, count == rows and "primary" or "secondary")
+    end
+end
+
+function UI:ToggleRowsMenu()
+    local open = not (self.profileMenuDismiss:IsShown() and self.rowsMenu:IsShown())
+    self:RefreshRowsControl()
+    self.profileMenu:Hide()
+    self.rowsMenu:Show()
+    self.profileMenuDismiss:SetShown(open)
+end
+
+function UI:SelectRows(rows)
+    if rows ~= 1 and rows ~= 2 and rows ~= 3 then return end
+    SH.Store:Options().nsrtRows = rows
+    self.profileMenuDismiss:Hide()
+    self:RefreshRowsControl()
+    SH.NSRTMacros:ApplyScale()
+    SH.Encounter:RefreshDisplays()
 end
 
 function UI:EnsureTimingDialog()
@@ -791,6 +1023,7 @@ function UI:RefreshLayoutEditor()
         self:StyleLayoutButton(position)
     end
     self:RefreshProfiles()
+    self:RefreshKeybindControls()
 end
 
 function UI:RefreshOpacityControl()
@@ -832,6 +1065,7 @@ function UI:Refresh()
     self.warningDelayLabel:SetText(string.format("Personal Warning Delay: %g s", warningDelay))
     for _, entry in ipairs(self.optionChecks) do entry.check:SetChecked(entry.getter()) end
     self.createMacrosButton:SetShown(SH.Store:Options().showNSRTMacros)
+    self:RefreshRowsControl()
     for _, entry in ipairs(self.scaleControls) do
         local value = tonumber(entry.getter()) or 1
         entry.slider._shUpdating = true

@@ -15,9 +15,11 @@ local defaults = {
         nsrtPanelOpen = false,
         nsrtAttachToMap = true,
         nsrtAutoShow = false,
-        nsrtDoubleRow = false,
+        nsrtRows = 1,
         nsrtShowEntranceExit = false,
         nsrtOppositeMacros = false,
+        nsrtKeybindsEnabled = false,
+        nsrtKeybinds = {},
         showSurgeTargets = false,
         receiveNSRT = true,
         previewFrames = false,
@@ -146,6 +148,10 @@ end
 
 function SH.Store:OnInitialize()
     if type(SszorakHelperDB) ~= "table" then SszorakHelperDB = {} end
+    local savedOptions = SszorakHelperDB.options
+    if type(savedOptions) == "table" and savedOptions.nsrtRows == nil then
+        savedOptions.nsrtRows = savedOptions.nsrtDoubleRow == true and 2 or 1
+    end
     local hadProfiles = type(SszorakHelperDB.layoutProfiles) == "table"
     local legacyLayout = validLayout(SszorakHelperDB.layout) and copy(SszorakHelperDB.layout) or copy(SH.Const.DEFAULT_LAYOUT)
     merge(SszorakHelperDB, copy(defaults))
@@ -155,10 +161,17 @@ function SH.Store:OnInitialize()
         SszorakHelperDB.temporaryLayout = nil
     end
     self.db = SszorakHelperDB
+    self.db.options.nsrtRows = self:GetNSRTRows()
+    self.db.options.nsrtDoubleRow = nil
 end
 
 function SH.Store:Options()
     return self.db.options
+end
+
+function SH.Store:GetNSRTRows()
+    local rows = tonumber(self:Options().nsrtRows)
+    return (rows == 2 or rows == 3) and rows or 1
 end
 
 function SH.Store:GetPersonalWarningDelay()

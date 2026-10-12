@@ -3,6 +3,7 @@ local combat, lockdown, inRaid = false, false, true
 local sends, result, now = 0, 0, 10
 local instanceID, subzone = 3004, ""
 local handlers, macros, secrets = {}, {}, {}
+local baseBindings, bindingOverrides, modifiers = {SPACE = "JUMP"}, {}, {}
 local SH = {modules = {}, version = "test"}
 local noop = function() end
 local function check(value, message) assert(value, message) end
@@ -21,6 +22,28 @@ STANDARD_TEXT_FONT = "font.ttf"
 Enum = {SendAddonMessageResult = {Success = 0}}
 InCombatLockdown = function() return combat end
 IsInRaid = function() return inRaid end
+IsShiftKeyDown = function() return modifiers.shift == true end
+IsControlKeyDown = function() return modifiers.ctrl == true end
+IsAltKeyDown = function() return modifiers.alt == true end
+GetBindingText = function(key) return key:gsub("SHIFT%-", "Shift-"):gsub("CTRL%-", "Ctrl-"):gsub("ALT%-", "Alt-") end
+GetBindingAction = function(key, overrides)
+    if overrides then
+        for _, keys in pairs(bindingOverrides) do if keys[key] then return keys[key] end end
+    end
+    return baseBindings[key] or ""
+end
+ClearOverrideBindings = function(owner)
+    check(not combat, "cleared keybinds during combat")
+    bindingOverrides[owner] = nil
+end
+SetOverrideBindingClick = function(owner, priority, key, button, mouseButton)
+    check(not combat, "assigned keybind during combat")
+    check(GetBindingAction(key, false) == "" and GetBindingAction(key, true) == "", "overwrote an existing keybind")
+    bindingOverrides[owner] = bindingOverrides[owner] or {}
+    bindingOverrides[owner][key] = "CLICK " .. button .. ":" .. mouseButton
+end
+SetBinding = function() error("changed a normal WoW binding") end
+SaveBindings = function() error("saved normal WoW bindings") end
 GetInstanceInfo = function() return nil, nil, nil, nil, nil, nil, nil, instanceID end
 GetSubZoneText = function() return subzone end
 GetTime = function() return now end
@@ -66,7 +89,12 @@ function frameMethods:CreateFontString() return frame(self) end
 function frameMethods:CreateTexture() return frame(self) end
 function frameMethods:CreateLine() return frame(self) end
 function frameMethods:Show() protected(self); self.shown = true end
-function frameMethods:Hide() protected(self); self.shown = false end
+function frameMethods:Hide()
+    protected(self)
+    local shown = self.shown
+    self.shown = false
+    if shown and self.scripts.OnHide then self.scripts.OnHide(self) end
+end
 function frameMethods:SetShown(value) protected(self); self.shown = value and true or false end
 function frameMethods:IsShown() return self.shown end
 function frameMethods:SetText(value) self.textValue = value end
@@ -130,7 +158,23 @@ check(SH.Store:Options().rotateMap == nil, "removed rotation option survived mig
 for _, event in ipairs(SH.Store:GetTimings(14)) do
     check(event.kind ~= "rotationStop", "removed rotation event remained in schedule editor")
 end
-check(SH.Store:Options().nsrtDoubleRow == false, "double row must be opt-in")
+check(SH.Store:GetNSRTRows() == 1, "new settings must start with one macro row")
+for _, legacy in ipairs({false, true}) do
+    SH.Store:Options().nsrtRows = nil
+    SH.Store:Options().nsrtDoubleRow = legacy
+    SH.Store:OnInitialize()
+    check(SH.Store:GetNSRTRows() == (legacy and 2 or 1), "saved Double Row setting was not migrated")
+    check(SH.Store:Options().nsrtDoubleRow == nil, "legacy Double Row setting survived migration")
+end
+SH.Store:Options().nsrtRows = 3
+SH.Store:Options().nsrtDoubleRow = true
+SH.Store:OnInitialize()
+check(SH.Store:GetNSRTRows() == 3, "legacy setting overwrote the selected row count")
+for _, invalid in ipairs({0, 4, 1.5, "invalid"}) do
+    SH.Store:Options().nsrtRows = invalid
+    SH.Store:OnInitialize()
+    check(SH.Store:GetNSRTRows() == 1, "invalid row count was not reset")
+end
 loadModule("UI/Widgets.lua")
 SH.RoomMap = setmetatable({frame = frame()}, {__index = function() return noop end})
 loadModule("UI/OrderFrame.lua")
@@ -147,10 +191,12 @@ SH.Store:Options().previewFrames = false
 SH.PersonalWarning:RefreshVisibility()
 check(not SH.PersonalWarning.frame:IsShown(), "warning preview did not hide")
 loadModule("UI/NSRTMacros.lua")
+loadModule("Core/Keybinds.lua")
 loadModule("UI/SurgeTargets.lua")
 loadModule("Core/Comms.lua")
 loadModule("Core/Encounter.lua")
 SH.NSRTMacros:OnInitialize()
+SH.Keybinds:OnInitialize()
 SH.SurgeTargets:OnInitialize()
 SH.Comms:OnInitialize()
 
@@ -503,13 +549,25 @@ ui.configurationButton.scripts.OnClick(ui.configurationButton)
 check(ui.scroll:IsShown() and not ui.layoutPage:IsShown() and not ui.profileMenuDismiss:IsShown(), "returning to Configuration left the layout or menu open")
 check(ui.header.title:GetText() == "Configuration", "Configuration title was not restored")
 
-local doubleRowCheck, attachToMapCheck, macroEnableCheck
+local attachToMapCheck, macroEnableCheck
 for _, entry in ipairs(SH.OptionsUI.optionChecks) do
-    if entry.check:GetParent().label:GetText() == "Double Row" then doubleRowCheck = entry.check end
     if entry.check:GetParent().label:GetText() == "Attach to Map" then attachToMapCheck = entry.check end
     if entry.check:GetParent().label:GetText() == "NSRT Macro Buttons" then macroEnableCheck = entry.check end
 end
-check(doubleRowCheck and doubleRowCheck:GetParent():GetParent().title:GetText() == "NSRT MACRO BUTTONS", "double row toggle is missing from NSRT section")
+check(ui.rowsDropdown:GetParent():GetParent().title:GetText() == "NSRT MACRO BUTTONS", "Rows dropdown is missing from NSRT section")
+local function chooseRows(rows)
+    ui.rowsDropdown.scripts.OnClick(ui.rowsDropdown)
+    check(ui.profileMenuDismiss:IsShown() and ui.rowsMenu:IsShown() and not ui.profileMenu:IsShown(), "Rows dropdown did not open its menu")
+    ui.rowsButtons[rows].scripts.OnClick(ui.rowsButtons[rows])
+    check(not ui.profileMenuDismiss:IsShown() and ui.rowsDropdown.text:GetText() == tostring(rows), "row choice did not update and close its menu")
+end
+ui.rowsDropdown.scripts.OnClick(ui.rowsDropdown)
+ui.profileSelector.scripts.OnClick(ui.profileSelector)
+check(ui.profileMenu:IsShown() and not ui.rowsMenu:IsShown(), "profile selector did not replace the Rows menu")
+ui.rowsDropdown.scripts.OnClick(ui.rowsDropdown)
+check(ui.rowsMenu:IsShown() and not ui.profileMenu:IsShown(), "Rows selector did not replace the profile menu")
+ui.profileMenuDismiss.scripts.OnMouseDown(ui.profileMenuDismiss)
+check(not ui.profileMenuDismiss:IsShown(), "click outside the Rows menu did not close it")
 check(ui.createMacrosButton:GetParent() == macroEnableCheck:GetParent(), "Create is outside the macro-enable cell")
 macroEnableCheck:SetChecked(false)
 macroEnableCheck.scripts.OnClick(macroEnableCheck)
@@ -691,9 +749,8 @@ options.nsrtAttachToMap, options.lockFrames = true, true
 
 -- Double row pairs opposite markers; secure targets and missing-macro blockers track each icon.
 SH.Store:ResetDefaultLayout()
-doubleRowCheck:SetChecked(true)
-doubleRowCheck.scripts.OnClick(doubleRowCheck)
-check(options.nsrtDoubleRow and SH.NSRTMacros.frame:GetWidth() == 180 and SH.NSRTMacros.frame:GetHeight() == 166, "double row toggle did not resize panel")
+chooseRows(2)
+check(options.nsrtRows == 2 and SH.NSRTMacros.frame:GetWidth() == 180 and SH.NSRTMacros.frame:GetHeight() == 166, "two-row choice did not resize panel")
 local topMarkers, bottomMarkers = {2, 7, 3}, {6, 4, 1}
 for _, scale in ipairs({0.5, 1, 2}) do
     options.roomMapScale = scale
@@ -723,12 +780,11 @@ end
 SH.Store:ClearTemporaryLayout()
 SH.NSRTMacros:RefreshLayout()
 combat = true
-doubleRowCheck:SetChecked(false)
-doubleRowCheck.scripts.OnClick(doubleRowCheck)
-check(SH.NSRTMacros.frame:GetWidth() == 180 and SH.NSRTMacros.doubleRow, "combat toggle moved macro targets immediately")
+chooseRows(1)
+check(SH.NSRTMacros.frame:GetWidth() == 180 and SH.NSRTMacros.rows == 2, "combat row choice moved macro targets immediately")
 combat = false
 for _, callback in ipairs(handlers.PLAYER_REGEN_ENABLED) do callback() end
-check(SH.NSRTMacros.frame:GetWidth() == 348 and SH.NSRTMacros.frame:GetHeight() == 100 and not SH.NSRTMacros.doubleRow, "queued single-row layout was not restored")
+check(SH.NSRTMacros.frame:GetWidth() == 348 and SH.NSRTMacros.frame:GetHeight() == 100 and SH.NSRTMacros.rows == 1, "queued single-row layout was not restored")
 for index, slot in ipairs(SH.NSRTMacros.frame.slots) do
     check(slot.point[2] == 10 + (index - 1) * 56 and slot.point[3] == 8, "single-row icon order was not restored")
 end
@@ -741,7 +797,7 @@ check(not entranceExitToggle:GetChecked(), "Entrance / Exit starts enabled")
 entranceExitToggle:SetChecked(true)
 entranceExitToggle.scripts.OnClick(entranceExitToggle)
 for _, doubleRow in ipairs({false, true}) do
-    options.nsrtDoubleRow = doubleRow
+    options.nsrtRows = doubleRow and 2 or 1
     SH.NSRTMacros:ApplyScale()
     check(SH.NSRTMacros.frame:GetWidth() == (doubleRow and 236 or 460), "Entrance / Exit did not expand panel width")
     local exitSlot, entranceSlot = SH.NSRTMacros.frame.slots[7], SH.NSRTMacros.frame.slots[8]
@@ -784,6 +840,44 @@ check(SH.Store:Options().nsrtShowEntranceExit, "saved Entrance / Exit setting wa
 ui:Refresh()
 check(entranceExitToggle:GetChecked(), "Entrance / Exit toggle lost its saved state")
 
+-- Three rows reproduce room positions without changing the stable macro bindings.
+chooseRows(3)
+check(SH.NSRTMacros.frame:GetWidth() == 180 and SH.NSRTMacros.frame:GetHeight() == 232, "three-row room layout has the wrong size")
+local roomGrid = {
+    {66, 140, 6}, {66, 74, 4}, {66, 8, 1},
+    {10, 8, 2}, {10, 74, 7}, {10, 140, 3},
+    {122, 140, 5}, {122, 74, 8},
+}
+for _, scale in ipairs({0.5, 1, 2}) do
+    options.roomMapScale = scale
+    SH.NSRTMacros:ApplyScale()
+    for index, expected in ipairs(roomGrid) do
+        local slot, target = SH.NSRTMacros.frame.slots[index], SH.NSRTMacros.secureFrame.buttons[index]
+        check(slot.point[2] == expected[1] and slot.point[3] == expected[2] and SH.NSRTMacros.markerIDs[index] == expected[3], "three-row marker does not match its room position")
+        check(target.point[2] == expected[1] * scale * 0.75 and target.point[3] == expected[2] * scale * 0.75, "three-row secure target missed its icon")
+        check(slot.blocker.point[2] == expected[1] and slot.blocker.point[3] == expected[2], "three-row missing-macro blocker missed its icon")
+        check(target.attributes.macro == "NSRT_SSZORAK_" .. expected[3], "three-row layout changed marker bindings")
+    end
+end
+options.roomMapScale = 1
+entranceExitToggle:SetChecked(false)
+entranceExitToggle.scripts.OnClick(entranceExitToggle)
+check(not SH.NSRTMacros.frame.slots[7]:IsShown() and not SH.NSRTMacros.secureFrame.buttons[8]:IsShown(), "three-row room markers did not hide")
+entranceExitToggle:SetChecked(true)
+entranceExitToggle.scripts.OnClick(entranceExitToggle)
+combat = true
+chooseRows(1)
+chooseRows(3)
+chooseRows(2)
+check(SH.NSRTMacros.rows == 3 and SH.NSRTMacros.frame:GetHeight() == 232, "combat choices changed the live room layout")
+combat = false
+for _, callback in ipairs(handlers.PLAYER_REGEN_ENABLED) do callback() end
+check(SH.NSRTMacros.rows == 2 and SH.NSRTMacros.frame:GetWidth() == 236, "latest deferred row choice was not applied")
+chooseRows(3)
+SH.Store:OnInitialize()
+ui:Refresh()
+check(SH.Store:GetNSRTRows() == 3 and ui.rowsDropdown.text:GetText() == "3", "three-row selection was not preserved on initialization")
+
 -- Opposite mode preserves the icons but sends and tracks the opposite room marker.
 local oppositeToggle, resetButton = SH.OptionsUI.oppositeMacrosToggle, SH.OptionsUI.createMacrosButton
 check(resetButton.text:GetText() == "Create", "macro creation action was not renamed")
@@ -805,10 +899,10 @@ for index, target in ipairs(SH.NSRTMacros.secureFrame.buttons) do
 end
 oppositeToggle:SetChecked(true)
 oppositeToggle.scripts.OnClick(oppositeToggle)
-for _, doubleRow in ipairs({false, true}) do
-    options.nsrtDoubleRow = doubleRow
+for _, rows in ipairs({1, 2, 3}) do
+    options.nsrtRows = rows
     SH.NSRTMacros:ApplyScale()
-    check(SH.NSRTMacros.frame:GetHeight() == (doubleRow and 200 or 134), "opposite notice overlaps macro icons")
+    check(SH.NSRTMacros.frame:GetHeight() == ({134, 200, 266})[rows], "opposite notice overlaps macro icons")
     for index, target in ipairs(SH.NSRTMacros.secureFrame.buttons) do
         check(target.attributes.macro == "NSRT_SSZORAK_" .. SH.NSRTMacros.sentMarkerIDs[index], "opposite binding disagrees with sent marker")
     end
@@ -861,7 +955,7 @@ check(not options.nsrtOppositeMacros and not oppositeToggle:GetChecked() and not
 for index, target in ipairs(SH.NSRTMacros.secureFrame.buttons) do
     check(target.attributes.macro == "NSRT_SSZORAK_" .. SH.NSRTMacros.markerIDs[index], "reset left opposite bindings")
 end
-options.nsrtDoubleRow = false
+options.nsrtRows = 1
 entranceExitToggle:SetChecked(false)
 entranceExitToggle.scripts.OnClick(entranceExitToggle)
 SH.NSRTMacros:ApplyScale()
@@ -873,8 +967,7 @@ options.previewFrames, options.showNSRTMacros, options.lockFrames = true, true, 
 SH.NSRTMacros.panelHidden = false
 SH.OptionsUI:Show()
 SH.Encounter:RefreshDisplays()
-doubleRowCheck:SetChecked(true)
-doubleRowCheck.scripts.OnClick(doubleRowCheck)
+chooseRows(2)
 local beforeDetachX, beforeDetachY = SH.NSRTMacros.frame:GetCenter()
 attachToMapCheck:SetChecked(false)
 attachToMapCheck.scripts.OnClick(attachToMapCheck)
@@ -894,7 +987,7 @@ check(SH.NSRTMacros.secureFrame:GetFrameStrata() == "TOOLTIP", "preview layer ch
 combat = false
 for _, callback in ipairs(handlers.PLAYER_REGEN_ENABLED) do callback() end
 check(SH.NSRTMacros.frame:GetFrameStrata() == "HIGH" and SH.NSRTMacros.secureFrame:GetFrameStrata() == "HIGH", "preview layer did not reset after combat")
-options.nsrtDoubleRow, options.nsrtAttachToMap, options.lockFrames = false, true, true
+options.nsrtRows, options.nsrtAttachToMap, options.lockFrames = 1, true, true
 SH.NSRTMacros:ApplyAttachment()
 SH.NSRTMacros:ApplyScale()
 
@@ -1063,7 +1156,7 @@ check(not SH.RoomMap.frame:IsShown(), "disabled macros prevented map cleanup on 
 
 -- The detached double-row panel remains usable with the room map turned off.
 instanceID, subzone = 3004, "Altar of the Six Winds"
-options.showRoomMap, options.showNSRTMacros, options.nsrtDoubleRow = false, true, true
+options.showRoomMap, options.showNSRTMacros, options.nsrtRows = false, true, 2
 options.nsrtAttachToMap, options.lockFrames = false, false
 SH.NSRTMacros:ApplyScale()
 SH.NSRTMacros:OnZoneChanged()
@@ -1078,6 +1171,131 @@ check(not SH.RoomMap.frame.scripts.OnUpdate and not SH.RoomMap.StartRotation, "i
 check(SH.Encounter.timers.push2.delay == 8 and SH.Encounter.timers.push3.delay == 18, "rotation removal changed wind prompt timings")
 for _, group in ipairs(SH.RoomMap.frame.groups) do check(group:IsShown(), "intermission hid static room markers") end
 SH.Encounter:CancelTimers()
+
+-- Room keybinds reject every existing binding and only clear this addon's overrides.
+local otherBindingOwner = {}
+bindingOverrides[otherBindingOwner] = {["ALT-X"] = "CLICK OtherAddonButton:LeftButton"}
+baseBindings["SHIFT-9"] = "ACTIONBUTTON9"
+baseBindings.MOUSEWHEELUP = "CAMERAZOOMIN"
+options.nsrtOppositeMacros, options.nsrtShowEntranceExit = false, true
+options.showNSRTMacros, options.previewFrames, options.nsrtPanelOpen = true, true, true
+SH.NSRTMacros.panelHidden = false
+SH.NSRTMacros:ApplyScale()
+SH.NSRTMacros:RefreshLayout()
+SH.NSRTMacros:RefreshVisibility()
+ui:Show()
+ui:SelectPage("layout")
+check(not options.nsrtKeybindsEnabled and not ui.layoutButtons[6].keybind:IsShown(), "room keybinds should start disabled")
+ui.enableKeybindsButton.scripts.OnClick(ui.enableKeybindsButton)
+check(options.nsrtKeybindsEnabled and ui.layoutButtons[6].keybind.text:GetText() == "Unassigned", "enabling keybinds did not reveal assignment labels")
+ui.layoutButtons[6].keybind.scripts.OnClick(nil, "LeftButton")
+check(not ui.capturePosition, "left-click started keybind capture")
+ui.layoutButtons[6].keybind.scripts.OnClick(nil, "RightButton")
+local capture = ui.keybindDialog
+check(capture:IsShown() and SH.Keybinds.capturing, "right-click did not start capture")
+local function captureKey(key, shift, ctrl, alt)
+    modifiers.shift, modifiers.ctrl, modifiers.alt = shift, ctrl, alt
+    capture.scripts.OnKeyDown(capture, key)
+    capture.scripts.OnKeyUp(capture, key)
+    modifiers.shift, modifiers.ctrl, modifiers.alt = false, false, false
+end
+captureKey("SPACE")
+check(capture:IsShown() and not SH.Keybinds:Get(6) and capture.panel.error:GetText():find("already bound", 1, true), "WoW binding conflict was not rejected with a warning")
+captureKey("9", true)
+check(not SH.Keybinds:Get(6) and baseBindings["SHIFT-9"] == "ACTIONBUTTON9", "modified WoW binding was overwritten")
+captureKey("X", false, false, true)
+check(capture:IsShown() and not SH.Keybinds:Get(6) and bindingOverrides[otherBindingOwner]["ALT-X"] == "CLICK OtherAddonButton:LeftButton", "another addon's binding was overwritten")
+modifiers.shift = true
+capture.scripts.OnKeyDown(capture, "7")
+check(not SH.Keybinds:Get(6), "capture assigned a key before it was released")
+modifiers.shift = false
+capture.scripts.OnKeyUp(capture, "LSHIFT")
+capture.scripts.OnKeyUp(capture, "7")
+check(SH.Keybinds:Get(6) == "SHIFT-7" and not capture:IsShown(), "modifier release lost the captured key")
+check(ui.layoutButtons[6].keybind.text:GetText() == "Shift-7", "assigned key label was not updated")
+check(GetBindingAction("SHIFT-7", true) == "CLICK SszorakHelperNSRTMacroButton4:LeftButton", "room key targeted the wrong macro slot")
+ui:BeginKeybindCapture(3)
+captureKey("7", true)
+check(capture:IsShown() and not SH.Keybinds:Get(3) and SH.Keybinds:Get(6) == "SHIFT-7", "duplicate room key replaced an existing assignment")
+check(capture.panel.error:GetText():find("already assigned", 1, true), "duplicate room key lacks a warning")
+capture.scripts.OnKeyDown(capture, "ESCAPE")
+ui:BeginKeybindCapture(6)
+captureKey("8", false, true)
+check(SH.Keybinds:Get(6) == "CTRL-8" and GetBindingAction("SHIFT-7", true) == "", "reassigning a room left its previous override active")
+ui:BeginKeybindCapture(6)
+capture.scripts.OnKeyDown(capture, "ESCAPE")
+check(SH.Keybinds:Get(6) == "CTRL-8" and GetBindingAction("CTRL-8", true) ~= "", "canceling capture lost the saved binding")
+ui:BeginKeybindCapture(6)
+capture.scripts.OnKeyDown(capture, "BACKSPACE")
+check(not SH.Keybinds:Get(6) and GetBindingAction("CTRL-8", true) == "", "clearing one room did not remove only its key")
+ui:BeginKeybindCapture(6)
+capture.panel.scripts.OnMouseWheel(capture.panel, 1)
+check(capture:IsShown() and not SH.Keybinds:Get(6), "mouse wheel replaced the existing camera binding")
+modifiers.alt = true
+capture.panel.scripts.OnMouseWheel(capture.panel, 1)
+modifiers.alt = false
+check(SH.Keybinds:Get(6) == "ALT-MOUSEWHEELUP", "modified mouse wheel was not captured")
+ui:BeginKeybindCapture(6)
+capture.panel.scripts.OnMouseDown(capture.panel, "Button4")
+capture.panel.scripts.OnMouseUp(capture.panel, "Button4")
+check(SH.Keybinds:Get(6) == "BUTTON4", "side mouse button was not captured")
+check(SH.Keybinds:Set(6, "SHIFT-7") and SH.Keybinds:Set(2, "CTRL-8") and SH.Keybinds:Set(1, "ALT-F8"), "free room keys could not be assigned")
+SH.Store:OnInitialize()
+SH.Keybinds:Refresh()
+check(options.nsrtKeybindsEnabled and SH.Keybinds:Get(6) == "SHIFT-7", "keybind settings were lost on initialization")
+check(GetBindingAction("ALT-F8", true) == "CLICK SszorakHelperNSRTMacroButton7:LeftButton", "Exit key targeted the wrong slot")
+options.nsrtShowEntranceExit = false
+SH.NSRTMacros:ApplyScale()
+SH.NSRTMacros:RefreshLayout()
+check(GetBindingAction("ALT-F8", true) == "" and GetBindingAction("SHIFT-7", true) ~= "", "hidden Exit left its key active or disabled a side key")
+options.nsrtShowEntranceExit = true
+SH.NSRTMacros:ApplyScale()
+SH.NSRTMacros:RefreshLayout()
+SH.NSRTMacros:CreateOrRepairMacros(true)
+check(SH.NSRTMacros.secureFrame.buttons[4].attributes.macro == "NSRT_SSZORAK_6" and GetBindingAction("SHIFT-7", true):find("Button4", 1, true), "room key ignored opposite mode")
+SH.Store:SetTemporaryLayout({8, 1, 2, 3, 4, 5, 6, 7}, "Caller")
+SH.NSRTMacros:RefreshLayout()
+check(SH.NSRTMacros.secureFrame.buttons[4].attributes.macro == "NSRT_SSZORAK_1" and SH.Keybinds:Get(6) == "SHIFT-7", "keybind moved away from its custom room position")
+SH.Store:ClearTemporaryLayout()
+SH.NSRTMacros:CreateOrRepairMacros()
+baseBindings["SHIFT-7"] = "TOGGLEWORLDMAP"
+for _, callback in ipairs(handlers.UPDATE_BINDINGS) do callback() end
+check(GetBindingAction("SHIFT-7", true) == "TOGGLEWORLDMAP" and not SH.Keybinds.appliedKeys["SHIFT-7"], "later WoW binding change was overwritten")
+check(SH.lastPrint:find("already bound", 1, true), "later binding conflict did not warn")
+baseBindings["SHIFT-7"] = nil
+SH.Keybinds:Refresh()
+bindingOverrides[otherBindingOwner]["CTRL-8"] = "CLICK OtherNewButton:LeftButton"
+SH.Keybinds:Refresh()
+check(GetBindingAction("CTRL-8", true) == "CLICK OtherNewButton:LeftButton" and not SH.Keybinds.appliedKeys["CTRL-8"], "later addon binding was overwritten")
+bindingOverrides[otherBindingOwner]["CTRL-8"] = nil
+SH.Keybinds:Refresh()
+ui:BeginKeybindCapture(6)
+combat = true
+for _, callback in ipairs(handlers.PLAYER_REGEN_DISABLED) do callback() end
+check(not capture:IsShown() and not SH.Keybinds.capturing, "combat did not close keybind capture")
+check(not SH.Keybinds:Set(6, "F10") and not SH.Keybinds:ClearAll() and not SH.Keybinds:SetEnabled(false), "combat allowed binding changes")
+check(SH.Keybinds:Get(6) == "SHIFT-7" and options.nsrtKeybindsEnabled, "combat rejection changed saved keybinds")
+combat = false
+for _, callback in ipairs(handlers.PLAYER_REGEN_ENABLED) do callback() end
+check(GetBindingAction("SHIFT-7", true) ~= "", "keybinds were not restored after combat")
+ui:BeginKeybindCapture(6)
+ui.frame:Hide()
+check(not capture:IsShown() and not SH.Keybinds.capturing, "closing Configuration left key capture active")
+ui:Show()
+ui.enableKeybindsButton.scripts.OnClick(ui.enableKeybindsButton)
+check(not options.nsrtKeybindsEnabled and SH.Keybinds:Get(6) == "SHIFT-7" and GetBindingAction("SHIFT-7", true) == "", "disabling keybinds did not preserve assignments and release keys")
+ui.enableKeybindsButton.scripts.OnClick(ui.enableKeybindsButton)
+check(GetBindingAction("SHIFT-7", true) ~= "", "re-enabling keybinds did not restore assignments")
+SH.NSRTMacros:SetPanelOpen(false)
+check(GetBindingAction("SHIFT-7", true) == "", "hidden macro panel left room keys active")
+SH.NSRTMacros:SetPanelOpen(true)
+check(GetBindingAction("SHIFT-7", true) ~= "", "showing macro panel did not restore room keys")
+ui.clearKeybindsButton.scripts.OnClick(ui.clearKeybindsButton)
+check(not next(options.nsrtKeybinds) and not next(SH.Keybinds.appliedKeys), "Clear Keybinds left addon assignments active")
+check(baseBindings.SPACE == "JUMP" and baseBindings["SHIFT-9"] == "ACTIONBUTTON9" and baseBindings.MOUSEWHEELUP == "CAMERAZOOMIN", "Clear Keybinds changed WoW bindings")
+check(bindingOverrides[otherBindingOwner]["ALT-X"] == "CLICK OtherAddonButton:LeftButton", "Clear Keybinds changed another addon's bindings")
+check(not ui.clearKeybindsButton:IsEnabled() and ui.layoutButtons[6].keybind.text:GetText() == "Unassigned", "Clear Keybinds did not update the editor")
+SH.Keybinds:SetEnabled(false)
 
 -- Compile every shipped Lua file, including load-on-demand configuration.
 for _, toc in ipairs({"SszorakHelper.toc", "Options/SszorakHelper_Options.toc"}) do

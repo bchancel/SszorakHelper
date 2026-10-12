@@ -20,15 +20,29 @@ local SLOT_START_X = 10
 local MACRO_ICONS = {"137001", "137002", "137003", "137004", "137005", "137006", "137007", "137008"}
 local MACRO_POSITIONS = {2, 3, 4, 6, 7, 8, SH.Const.EXIT_POSITION, SH.Const.ENTRANCE_POSITION}
 
-local function slotPoint(slotIndex, doubleRow)
+function SH.NSRTMacros:GetSlotForPosition(position)
+    for slot, roomPosition in ipairs(MACRO_POSITIONS) do
+        if roomPosition == position then return slot end
+    end
+end
+
+local function slotPoint(slotIndex, rows)
     local column = slotIndex - 1
     -- Keep bindings stable: the left-side markers (slots 4-6) sit above their opposites.
     local row = 0
-    if doubleRow then
+    if rows == 2 then
         if slotIndex > 6 then
             column, row = 3, slotIndex == 7 and 1 or 0
         else
             column, row = (slotIndex - 1) % 3, slotIndex > 3 and 1 or 0
+        end
+    elseif rows == 3 then
+        if slotIndex > 6 then
+            column, row = 2, slotIndex == 7 and 2 or 1
+        elseif slotIndex <= 3 then
+            column, row = 1, 3 - slotIndex
+        else
+            column, row = 0, slotIndex - 4
         end
     end
     return SLOT_START_X + column * (SLOT_WIDTH + SLOT_GAP), 8 + row * (SLOT_HEIGHT + SLOT_GAP)
@@ -322,12 +336,20 @@ function SH.NSRTMacros:ApplyScale()
         self.pendingSecureRefresh = true
         return
     end
-    self.doubleRow = SH.Store:Options().nsrtDoubleRow == true
+    self.rows = SH.Store:GetNSRTRows()
     self.showEntranceExit = SH.Store:Options().nsrtShowEntranceExit == true
-    local columns = self.doubleRow and (self.showEntranceExit and 4 or 3) or (self.showEntranceExit and 8 or 6)
+    local columns
+    if self.rows == 3 then
+        -- Reserve the optional room-marker column so the title and Hide button fit.
+        columns = 3
+    elseif self.rows == 2 then
+        columns = self.showEntranceExit and 4 or 3
+    else
+        columns = self.showEntranceExit and 8 or 6
+    end
     local width = SLOT_START_X * 2 + SLOT_WIDTH * columns + SLOT_GAP * (columns - 1)
     local opposite = SH.Store:Options().nsrtOppositeMacros == true
-    local height = PANEL_HEIGHT + (self.doubleRow and (SLOT_HEIGHT + SLOT_GAP) or 0)
+    local height = PANEL_HEIGHT + (self.rows - 1) * (SLOT_HEIGHT + SLOT_GAP)
         + (opposite and OPPOSITE_NOTICE_HEIGHT or 0)
     self.frame:SetSize(width, height)
     self.frame.oppositeNotice:SetWidth(width - 20)
@@ -336,7 +358,7 @@ function SH.NSRTMacros:ApplyScale()
     self.secureFrame:SetScale(1)
     self.secureFrame:SetSize(width * scale, height * scale)
     for slotIndex, button in ipairs(self.secureFrame.buttons) do
-        local x, y = slotPoint(slotIndex, self.doubleRow)
+        local x, y = slotPoint(slotIndex, self.rows)
         local slot = self.frame.slots[slotIndex]
         local shown = slotIndex <= 6 or self.showEntranceExit
         slot:SetShown(shown)
@@ -394,6 +416,7 @@ function SH.NSRTMacros:RefreshLayout()
     end
     self.pendingSecureRefresh = nil
     self:RefreshHighlights()
+    if SH.Keybinds then SH.Keybinds:Refresh() end
 end
 
 function SH.NSRTMacros:SetOrder(markers)
@@ -458,5 +481,7 @@ function SH.NSRTMacros:RefreshVisibility()
     if shouldShow then
         self:ApplySecurePosition()
         self:RefreshLayout()
+    elseif SH.Keybinds then
+        SH.Keybinds:Refresh()
     end
 end
