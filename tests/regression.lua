@@ -19,7 +19,8 @@ local function secret()
 end
 issecretvalue = function(value) return secrets[value] == true end
 STANDARD_TEXT_FONT = "font.ttf"
-Enum = {SendAddonMessageResult = {Success = 0}}
+Enum = {SendAddonMessageResult = {Success = 0, InvalidPrefix = 1, InvalidMessage = 2, AddonMessageThrottle = 3,
+    InvalidChatType = 4, NotInGroup = 5, ChannelThrottle = 8, GeneralError = 9, AddOnMessageLockdown = 11}}
 InCombatLockdown = function() return combat end
 IsInRaid = function() return inRaid end
 IsShiftKeyDown = function() return modifiers.shift == true end
@@ -87,6 +88,7 @@ function frameMethods:RegisterForClicks(...) self.clicks = {...} end
 function frameMethods:SetScript(key, value) self.scripts[key] = value end
 function frameMethods:CreateFontString() return frame(self) end
 function frameMethods:CreateTexture() return frame(self) end
+function frameMethods:CreateMaskTexture() return frame(self) end
 function frameMethods:CreateLine() return frame(self) end
 function frameMethods:Show() protected(self); self.shown = true end
 function frameMethods:Hide()
@@ -120,6 +122,10 @@ function frameMethods:SetValue(value)
 end
 function frameMethods:SetFormattedText(format, ...) self.formatted = {format, ...} end
 function frameMethods:SetFont(path, size) self.fontSize = size end
+function frameMethods:SetTexture(value) self.textureValue = value end
+function frameMethods:GetTexture() return self.textureValue end
+function frameMethods:SetAlpha(value) self.alphaValue = value end
+function frameMethods:GetAlpha() return self.alphaValue or 1 end
 function frameMethods:GetCenter() return rawget(self, "centerX") or 400, rawget(self, "centerY") or 300 end
 function frameMethods:GetEffectiveScale() return (rawget(self, "scale") or 1) * (self.parent and self.parent:GetEffectiveScale() or 1) end
 function frameMethods:SetScale(value) protected(self); self.scale = value end
@@ -490,6 +496,9 @@ SH.Encounter:Stop()
 
 -- Build actual option widgets; drafts, invalid input, defaults, and every difficulty gear.
 _G.SszorakHelper = SH
+loadModule("Core/MythicPositions.lua")
+SH.MythicPositions:OnInitialize()
+loadModule("Options/MythicPositions.lua")
 loadModule("UI/LayoutOffer.lua")
 SH.LayoutOffer:OnInitialize()
 loadModule("Options/Configuration.lua")
@@ -1296,6 +1305,18 @@ check(baseBindings.SPACE == "JUMP" and baseBindings["SHIFT-9"] == "ACTIONBUTTON9
 check(bindingOverrides[otherBindingOwner]["ALT-X"] == "CLICK OtherAddonButton:LeftButton", "Clear Keybinds changed another addon's bindings")
 check(not ui.clearKeybindsButton:IsEnabled() and ui.layoutButtons[6].keybind.text:GetText() == "Unassigned", "Clear Keybinds did not update the editor")
 SH.Keybinds:SetEnabled(false)
+
+assert(loadfile("tests/room_map_options.lua"))(SH)
+assert(loadfile("tests/fury_countdown.lua"))(SH)
+assert(loadfile("tests/room_map_spread.lua"))(SH)
+assert(loadfile("tests/mythic_transfer.lua"))()
+assert(loadfile("tests/mythic_positions.lua"))(SH, {
+    setCombat = function(value) combat = value end,
+    setLockdown = function(value) lockdown = value end,
+    setRaid = function(value) inRaid = value end,
+    fire = function(event) for _, callback in ipairs(handlers[event] or {}) do callback() end end,
+    secret = secret,
+})
 
 -- Compile every shipped Lua file, including load-on-demand configuration.
 for _, toc in ipairs({"SszorakHelper.toc", "Options/SszorakHelper_Options.toc"}) do

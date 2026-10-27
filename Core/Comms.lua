@@ -49,12 +49,28 @@ function SH.Comms:IsLockedDown()
         or (SH.Encounter and SH.Encounter.active) or false
 end
 
-function SH.Comms:Send(message)
-    if SH.Encounter and SH.Encounter.testMode then return false end
-    if not IsInRaid() or self:IsLockedDown() then return false end
+function SH.Comms:IsThrottleResult(result)
+    local values = Enum.SendAddonMessageResult
+    return result ~= nil and (result == values.AddonMessageThrottle or result == values.ChannelThrottle)
+end
+
+function SH.Comms:Send(message, allowTestConfiguration)
+    self.lastSendResult, self.lastSendError = nil, nil
+    if InCombatLockdown() then self.lastSendError = "Combat is active. Publish after combat."
+    elseif not IsInRaid() then self.lastSendError = "You are not in a raid group."
+    elseif self:IsLockedDown() then self.lastSendError = "Encounter or chat messaging lockdown is active."
+    elseif SH.Encounter and SH.Encounter.testMode and not allowTestConfiguration then self.lastSendError = "This message is disabled in Test Mode." end
+    if self.lastSendError then return false, self.lastSendError end
     local ok, result = pcall(C_ChatInfo.SendAddonMessage, SH.Const.PREFIX, message, "RAID")
     self.lastSendResult = ok and result or nil
-    return ok and result == Enum.SendAddonMessageResult.Success
+    if ok and result == Enum.SendAddonMessageResult.Success then return true end
+    if not ok then self.lastSendError = "WoW rejected the addon-message call: " .. tostring(result)
+    else
+        local name
+        for key, value in pairs(Enum.SendAddonMessageResult) do if value == result then name = key; break end end
+        self.lastSendError = name and ("WoW addon messaging: " .. name .. ".") or "WoW returned no recognized addon-message result."
+    end
+    return false, self.lastSendError
 end
 
 function SH.Comms:IsSenderLeader(sender)
@@ -97,7 +113,14 @@ end
 function SH.Comms:OnAddonMessage(message, sender)
     if secretValue(message) or secretValue(sender) then return end
     if type(message) ~= "string" or type(sender) ~= "string" then return end
-    if self:IsLockedDown() or (SH.Encounter and SH.Encounter.testMode) then return end
+    if InCombatLockdown() or self:IsLockedDown() then return end
+    -- Explicit leader configuration can be shared before combat in Test Mode.
+    -- Ordinary test messages remain local and use the raid-macro test receiver.
+    if message:match("^MP[BSEA]|") and SH.MythicPositions then
+        SH.MythicPositions:OnMessage(message, sender)
+        return
+    end
+    if SH.Encounter and SH.Encounter.testMode then return end
     local payload = message:match("^LAYOUT|(.+)$")
     if not payload or not self:IsSenderLeader(sender) or namesMatch(sender, unitName("player")) then return end
     local layout, seen = {}, {}

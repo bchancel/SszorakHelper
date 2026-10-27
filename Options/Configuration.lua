@@ -153,8 +153,10 @@ function UI:Ensure()
     configuration:SetPoint("TOPLEFT", 18, -126)
     local markerLayout = SH.Widgets:Button(nav, "Marker Layout", 134, 32, function() UI:SelectPage("layout") end, "secondary")
     markerLayout:SetPoint("TOPLEFT", 18, -166)
+    local mythicPositions = SH.Widgets:Button(nav, "Mythic Positions", 134, 32, function() UI:SelectPage("mythic") end, "secondary")
+    mythicPositions:SetPoint("TOPLEFT", 18, -206)
     local test = SH.Widgets:Button(nav, "TEST", 134, 34, function() UI:EnterTestMode() end, "primary")
-    test:SetPoint("TOPLEFT", 18, -210)
+    test:SetPoint("TOPLEFT", 18, -250)
     test.tooltipTitle = "Test encounter"
     test.tooltip = "Show encounter frames and fake-event controls.\n\nTurn off Lock Frames to move the frames."
 
@@ -177,7 +179,7 @@ function UI:Ensure()
     scroll:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
     scroll:SetPoint("BOTTOMRIGHT", -28, 16)
     local content = CreateFrame("Frame", nil, scroll)
-    content:SetSize(730, 704)
+    content:SetSize(730, 740)
     scroll:SetScrollChild(content)
 
     local options = SH.Store:Options()
@@ -185,10 +187,18 @@ function UI:Ensure()
     local frameSection = makeSection(content, "Frame Options", -6, 208)
     addToggle(frameSection, "Preview Frames", CELL_LEFT, -34, function() return options.previewFrames end, function(v) options.previewFrames = v end)
     addToggle(frameSection, "Lock Frames", CELL_RIGHT, -34, function() return options.lockFrames end, function(v) options.lockFrames = v end)
-    addToggle(frameSection, "Room Mini Map", CELL_LEFT, -68, function() return options.showRoomMap end, function(v) options.showRoomMap = v end)
+    local roomMapCell = addToggle(frameSection, "Room Mini Map", CELL_LEFT, -68, function() return options.showRoomMap end, function(v) options.showRoomMap = v end)
+    roomMapCell.label:SetWidth(CELL_WIDTH - 112)
+    local roomMapGear = SH.Widgets:Button(roomMapCell, "", 26, 26, function() UI:ShowRoomMapDialog() end, "secondary")
+    roomMapGear:SetPoint("RIGHT", -62, 0)
+    roomMapGear.icon = roomMapGear:CreateTexture(nil, "ARTWORK")
+    roomMapGear.icon:SetSize(20, 20)
+    roomMapGear.icon:SetPoint("CENTER")
+    roomMapGear.icon:SetTexture("Interface\\Buttons\\UI-OptionsButton")
+    roomMapGear.tooltip = "Configure the clear button, your Mythic spread position, and wind order buttons."
+    self.roomMapGearButton = roomMapGear
     addToggle(frameSection, "Wind Drop Order Frame", CELL_RIGHT, -68, function() return options.showOrderFrame end, function(v) options.showOrderFrame = v end)
     addToggle(frameSection, "Surge Targets", CELL_LEFT, -102, function() return options.showSurgeTargets end, function(v) options.showSurgeTargets = v end)
-    addToggle(frameSection, "Show Clear Button", CELL_RIGHT, -102, function() return options.showClearButton end, function(v) options.showClearButton = v end)
     addScaleControl(frameSection, "Map Scale", CELL_LEFT, -136, function() return options.roomMapScale end, function(v)
         options.roomMapScale = v
         SH.RoomMap:ApplyScale()
@@ -261,7 +271,7 @@ function UI:Ensure()
     local intermission = makeSection(content, "Intermission Options", -370, 70)
     addToggle(intermission, "Show Push Direction Warning", CELL_LEFT, -34, function() return options.raidWarningPushes end, function(v) options.raidWarningPushes = v end)
 
-    local other = makeSection(content, "Personal Warnings / NSRT", -448, 138)
+    local other = makeSection(content, "Personal Warnings / NSRT", -448, 172)
     addToggle(other, "Show Drop Location Warning", CELL_LEFT, -34, function() return options.raidWarningSurges end, function(v) options.raidWarningSurges = v end)
     addToggle(other, "TTS Warnings", CELL_RIGHT, -34, function() return options.ttsWarnings end, function(v) options.ttsWarnings = v end)
     local fontCell = optionCell(other, CELL_LEFT, -68, CELL_WIDTH)
@@ -287,7 +297,16 @@ function UI:Ensure()
         if userInput then SH.PersonalWarning:Show("%s", "Personal warning preview") end
     end)
     self.warningDelaySlider:SetPoint("RIGHT", -12, 0)
-    local difficulty = makeSection(content, "Enabled Difficulties", -594, 104)
+    local fury = addToggle(other, "Serpent's Fury Countdown", CELL_LEFT, -136,
+        function() return options.showFuryCountdown end, function(v) options.showFuryCountdown = v end)
+    toggleTooltip(fury, "Serpent's Fury countdown",
+        "Mythic only. Show Stack in 5, 4, 3, 2, 1 and Stack now in the personal warning frame.\nUses NSRT's Fury reminder times; edit the stack endpoints with the Mythic timing gear.\nTest Mode's Fury Countdown button previews it even when this display is disabled.")
+    local furyVoice = addToggle(other, "Fury Voice Countdown", CELL_RIGHT, -136,
+        function() return options.furyVoiceCountdown end, function(v) options.furyVoiceCountdown = v end)
+    toggleTooltip(furyVoice, "Fury voice countdown",
+        "Play short voice cues five through one, then Stack, in sync with the Fury countdown and its Test Mode preview.\nIndependent of the general TTS Warnings toggle and speech queue. Off by default.")
+    self.furyCountdownToggle, self.furyVoiceToggle = fury.check, furyVoice.check
+    local difficulty = makeSection(content, "Enabled Difficulties", -628, 104)
     self.difficultyGearButtons = {}
     for index, definition in ipairs(SH.Const.DIFFICULTIES) do
         local difficultyID = definition.id
@@ -491,6 +510,7 @@ function UI:Ensure()
     frame:SetScript("OnMouseDown", function(self) self:Raise() end)
     frame:SetScript("OnHide", function()
         menuDismiss:Hide()
+        if UI.roomMapDialog then UI.roomMapDialog:Hide() end
         UI:CancelKeybindCapture()
     end)
     frame:RegisterForDrag("LeftButton")
@@ -511,21 +531,119 @@ function UI:Ensure()
     self.resetLayoutButton = resetLayout
     self.testButton = test
     self.topCloseButton = topClose
+    self.mythicPositionsButton = mythicPositions
+    if SH.MythicPositionsUI then self.mythicPage = SH.MythicPositionsUI:Create(self) end
 end
 
 function UI:SelectPage(page)
     self:Ensure()
-    self.page = page == "layout" and "layout" or "configuration"
+    self.page = (page == "layout" or (page == "mythic" and self.mythicPage)) and page or "configuration"
     self.profileMenuDismiss:Hide()
+    if self.roomMapDialog then self.roomMapDialog:Hide() end
     self:CancelKeybindCapture()
     self.selectedLayoutPosition = nil
     local layout = self.page == "layout"
-    self.scroll:SetShown(not layout)
+    local mythic = self.page == "mythic"
+    self.scroll:SetShown(not layout and not mythic)
     self.layoutPage:SetShown(layout)
-    self.header.title:SetText(layout and "Marker Layout" or "Configuration")
-    SH.Widgets:StyleButton(self.configurationButton, layout and "secondary" or "primary")
+    if self.mythicPage then self.mythicPage:SetShown(mythic) end
+    self.header.title:SetText(layout and "Marker Layout" or mythic and "Mythic Positions" or "Configuration")
+    SH.Widgets:StyleButton(self.configurationButton, (layout or mythic) and "secondary" or "primary")
     SH.Widgets:StyleButton(self.markerLayoutButton, layout and "primary" or "secondary")
+    SH.Widgets:StyleButton(self.mythicPositionsButton, mythic and "primary" or "secondary")
+    if mythic then SH.MythicPositionsUI:Open() end
     self:Refresh()
+end
+
+function UI:ShowRoomMapDialog()
+    if not self.roomMapDialog then
+        local shade = CreateFrame("Frame", nil, self.frame, "BackdropTemplate")
+        shade:SetAllPoints(self.frame)
+        shade:SetFrameLevel(self.frame:GetFrameLevel() + 50)
+        shade:EnableMouse(true)
+        SH.Widgets:ApplyBackdrop(shade, SH.Widgets.colors.overlay, SH.Widgets.colors.transparent)
+        local panel = CreateFrame("Frame", nil, shade, "BackdropTemplate")
+        panel:SetSize(380, 520)
+        panel:SetPoint("CENTER")
+        SH.Widgets:ApplyBackdrop(panel, SH.Widgets.colors.canvasAlt, SH.Widgets.colors.borderStrong)
+        local title = SH.Widgets:Text(panel, "Room Mini Map", true)
+        title:SetPoint("TOPLEFT", 18, -18)
+        local options = SH.Store:Options()
+        local function choices(label, y, key, definitions)
+            local text = SH.Widgets:Label(panel, label)
+            text:SetPoint("TOPLEFT", 18, y)
+            local buttons = {}
+            for i, definition in ipairs(definitions) do
+                local value = definition[1]
+                local button = SH.Widgets:Button(panel, definition[2], 108, 26, function()
+                    options[key] = value
+                    SH.RoomMap:ApplyFloorStyle()
+                    SH.RoomMap:RefreshMythicPosition()
+                    if SH.MythicPositionsUI then SH.MythicPositionsUI:Refresh() end
+                    UI:RefreshRoomMapControls()
+                end, "secondary")
+                button:SetPoint("TOPLEFT", 18 + (i - 1) * 116, y - 21)
+                buttons[#buttons + 1] = {button = button, value = value}
+            end
+            return buttons
+        end
+        self.roomMapChoices = {}
+        self.roomMapChoices.roomMapBackground = choices("Background", -49, "roomMapBackground", {{"none", "None"}, {"outline", "Floor outline"}, {"floor", "Room floor"}})
+        self.roomMapOpacityLabel = SH.Widgets:Label(panel, "Floor opacity: 60%")
+        self.roomMapOpacityLabel:SetPoint("TOPLEFT", 18, -108)
+        self.roomMapOpacity = SH.Widgets:Slider(panel, 166, 0, 1, 0.05, function(value)
+            options.roomMapFloorOpacity = math.floor(value * 20 + 0.5) / 20
+            SH.RoomMap:ApplyFloorStyle()
+            UI:RefreshRoomMapControls()
+        end)
+        self.roomMapOpacity:SetPoint("TOPRIGHT", -22, -107)
+        local clear = addToggle(panel, "Show clear button", 18, -144,
+            function() return options.showClearButton end, function(value) options.showClearButton = value end)
+        local spread = addToggle(panel, "Show mythic spread position", 18, -182,
+            function() return options.showMythicPosition end, function(value)
+                options.showMythicPosition = value
+                SH.MythicPositions:RefreshPersonal()
+                if SH.MythicPositionsUI then SH.MythicPositionsUI:Refresh() end
+            end)
+        toggleTooltip(spread, "Mythic spread position", "Show your assigned static green position dot on the Mythic room mini map and in previews.")
+        local label = addToggle(panel, "Label my assigned position", 18, -220,
+            function() return options.roomMapShowAssignmentLabel end, function(value) options.roomMapShowAssignmentLabel = value end)
+        local boss = addToggle(panel, "Show boss landmark", 18, -258,
+            function() return options.roomMapShowBoss end, function(value) options.roomMapShowBoss = value end)
+        toggleTooltip(boss, "Boss landmark", "Show a boss portrait with Mythic spread positions. The portrait and your point rotate together; the room and floor markers stay fixed.")
+        local winds = addToggle(panel, "Show wind order buttons", 18, -296,
+            function() return options.showWindOrderButtons ~= false end, function(value) options.showWindOrderButtons = value end)
+        toggleTooltip(winds, "Wind order buttons", "Show the 1, 2, 3 selection buttons below each side marker. Turning them off keeps the markers and current wind assignments visible.")
+        self.roomMapChoices.roomMapSpreadSide = choices("Spread side", -343, "roomMapSpreadSide", {{"auto", "Automatic"}, {"entrance", "Entrance"}, {"exit", "Exit"}})
+        self.roomMapChoices.roomMapStartingSide = choices("Automatic starting side", -405, "roomMapStartingSide", {{"entrance", "Entrance"}, {"exit", "Exit"}})
+        self.roomMapSideHint = SH.Widgets:Label(panel, "Changes with each Fury countdown; resets at pull.")
+        self.roomMapSideHint:SetPoint("TOPLEFT", 18, -463)
+        self.roomMapSideHint:SetWidth(344)
+        self.roomMapSideHint:SetFont(STANDARD_TEXT_FONT, 11)
+        local close = SH.Widgets:Button(panel, "Close", 100, 28, function() shade:Hide() end, "secondary")
+        close:SetPoint("BOTTOMRIGHT", -18, 18)
+        shade.close = close
+        self.roomMapDialog = shade
+        self.roomMapChecks = {clear = clear.check, spread = spread.check, winds = winds.check, label = label.check, boss = boss.check}
+    end
+    self:Refresh()
+    self.roomMapDialog:Show()
+end
+
+function UI:RefreshRoomMapControls()
+    if not self.roomMapChoices then return end
+    local options = SH.Store:Options()
+    for key, buttons in pairs(self.roomMapChoices) do
+        for _, entry in ipairs(buttons) do
+            entry.button._shEnabledStyle = options[key] == entry.value and "primary" or "secondary"
+            SH.Widgets:SetEnabled(entry.button, key ~= "roomMapStartingSide" or options.roomMapSpreadSide == "auto")
+        end
+    end
+    local opacity = tonumber(options.roomMapFloorOpacity) or 0.6
+    self.roomMapOpacity._shUpdating = true
+    self.roomMapOpacity:SetValue(opacity)
+    self.roomMapOpacity._shUpdating = false
+    self.roomMapOpacityLabel:SetText(string.format("Floor opacity: %d%%", math.floor(opacity * 100 + 0.5)))
 end
 
 function UI:RefreshKeybindControls()
@@ -708,7 +826,7 @@ function UI:EnsureTimingDialog()
     SH.Widgets:ApplyBackdrop(panel, SH.Widgets.colors.canvasAlt, SH.Widgets.colors.borderStrong)
     panel.title = SH.Widgets:Text(panel, "Encounter timings", true)
     panel.title:SetPoint("TOPLEFT", 20, -18)
-    local hint = SH.Widgets:Label(panel, "Event times from the pull. Enter minutes:seconds or seconds. Surge warnings appear 3 seconds before the listed cast. Save applies next pull.")
+    local hint = SH.Widgets:Label(panel, "Event times from the pull. Enter minutes:seconds or seconds. Surge warns 3 seconds before cast; Fury counts down the last 5 seconds to stack. Save applies next pull.")
     hint:SetPoint("TOPLEFT", 20, -50)
     hint:SetWidth(620)
     hint:SetWordWrap(true)
@@ -1074,6 +1192,7 @@ function UI:Refresh()
         entry.text:SetText(string.format("%s: %d%%", entry.label, math.floor((value * 100) + 0.5)))
     end
     self:RefreshOpacityControl()
+    self:RefreshRoomMapControls()
     self:RefreshLayoutEditor()
     local canPublish = IsInRaid() and UnitIsGroupLeader("player") and not SH.Comms:IsLockedDown()
     self.publishButton._shEnabledStyle = "success"
@@ -1082,6 +1201,7 @@ end
 
 function UI:Show()
     self:Ensure()
+    if self.page == "mythic" and SH.MythicPositionsUI then SH.MythicPositionsUI:Open() end
     self:Refresh()
     self.frame:Show()
     self.frame:Raise()
@@ -1090,7 +1210,7 @@ end
 function UI:EnsureTestFrame()
     if self.testFrame then return end
     local frame = CreateFrame("Frame", "SszorakHelperTestFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(220, 270)
+    frame:SetSize(220, 310)
     frame:SetFrameStrata("FULLSCREEN_DIALOG")
     frame:SetClampedToScreen(true)
     frame:Hide()
@@ -1105,13 +1225,19 @@ function UI:EnsureTestFrame()
     local definitions = {
         {"Surge 1", function() SH.Encounter:WarnSurge(1, true) end, "primary"},
         {"Surge 2", function() SH.Encounter:WarnSurge(2, true) end, "primary"},
+        {"Fury Countdown", function() SH.Encounter:TestFuryCountdown() end, "primary"},
         {"Intermission", function() SH.Encounter:TestIntermission() end, "pink"},
         {"Reset", function() SH.Encounter:ClearAssignments("test") end, "danger"},
         {"Quit Test Mode", function() UI:QuitTestMode() end, "success"},
     }
+    self.testButtons = {}
     for index, definition in ipairs(definitions) do
         local button = SH.Widgets:Button(frame, definition[1], 188, 30, definition[2], definition[3])
         button:SetPoint("TOPLEFT", 16, -66 - ((index - 1) * 38))
+        if definition[1] == "Fury Countdown" then
+            button.tooltip = "Preview the next Fury countdown and alternating spread side. Reset returns to the configured starting side."
+        end
+        self.testButtons[definition[1]] = button
     end
     frame._shUnlocked = true
     SH.Widgets:MakeMovable(frame, "test", frame)

@@ -2,7 +2,7 @@
 ## Title: Sszorak Helper
 ## Notes: Coordinates Sszorak wind directions, surge drops, and intermission pushes.
 ## Author: Sszorak Helper
-## Version: 12.1.6
+## Version: 12.1.7
 ## X-Curse-Project-ID: 1685288
 ## IconTexture: 7966619
 ## X-Website: https://github.com/bchancel/SszorakHelper
@@ -11,6 +11,7 @@
 SszorakHelper.lua
 Core/Constants.lua
 Core/Store.lua
+Core/MythicPositions.lua
 UI/Widgets.lua
 UI/MinimapButton.lua
 UI/OrderFrame.lua

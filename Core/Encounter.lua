@@ -76,6 +76,7 @@ function SH.Encounter:Start(encounterName, difficultyID)
     self.timelineEvents = {}
     self.seenTimelineEvents = {}
     self:CancelTimers()
+    self:SetFuryIndex(1)
     SH.SurgeTargets:Reset()
     self:ScheduleFight()
     SH.RoomMap:RefreshLayout()
@@ -89,12 +90,14 @@ function SH.Encounter:Stop()
     SH.Comms.receivedCount = 0
     SH.Comms.receivedMarkers = {}
     self:CancelTimers()
+    self:SetFuryIndex(1)
     self.timelineEvents = {}
     self.seenTimelineEvents = {}
     self:RefreshDisplays()
 end
 
 function SH.Encounter:CancelTimers()
+    self:CancelFuryCountdown()
     for _, timer in pairs(self.timers) do cancelTimer(timer) end
     wipe(self.timers)
 end
@@ -120,16 +123,19 @@ function SH.Encounter:AcceptProposal(order, position)
 end
 
 function SH.Encounter:ClearAssignments()
+    self:CancelFuryCountdown()
     SH.PersonalWarning:Hide()
     self.assignments = {}
     SH.Comms.receivedCount = 0
     SH.Comms.receivedMarkers = {}
     self.revision = 0
+    if self.testMode then self.testFuryIndex = 0; self:SetFuryIndex(1) end
     SH.OrderFrame:Update(nil)
     self:RefreshDisplays()
 end
 
 function SH.Encounter:ResetForNextPhase()
+    self:CancelFuryCountdown()
     SH.PersonalWarning:Hide()
     self.assignments = {}
     SH.Comms.receivedCount = 0
@@ -197,10 +203,83 @@ function SH.Encounter:SendWarning(text, isTest)
     SH.PersonalWarning:Show("%s", text)
 end
 
-function SH.Encounter:SpeakWarning(text)
-    if not SH.Store:Options().ttsWarnings then return end
+function SH.Encounter:SpeakWarning(text, enabled)
+    if enabled == nil then enabled = SH.Store:Options().ttsWarnings end
+    if not enabled then return end
     if not C_VoiceChat or not C_VoiceChat.SpeakText then return end
     pcall(C_VoiceChat.SpeakText, 0, text, 0, 100, false)
+end
+
+function SH.Encounter:CancelFuryCountdown()
+    cancelTimer(self.timers.furyTick)
+    self.timers.furyTick = nil
+    self.furyCountdown = nil
+    self:StopFuryVoice()
+end
+
+function SH.Encounter:StopFuryVoice()
+    if self.furyVoiceHandle and type(StopSound) == "function" then pcall(StopSound, self.furyVoiceHandle, 0) end
+    self.furyVoiceHandle = nil
+end
+
+function SH.Encounter:PlayFuryVoice(number, enabled)
+    -- A short local cue starts on this tick, independent of the shared TTS queue.
+    -- Only our previous sound handle is stopped, including Reset/Quit cleanup.
+    self:StopFuryVoice()
+    if not enabled or type(PlaySoundFile) ~= "function" then return end
+    local cue = number > 0 and tostring(number) or "stack"
+    local ok, played, handle = pcall(PlaySoundFile, "Interface\\AddOns\\SszorakHelper\\Media\\Countdown\\" .. cue .. ".ogg", "Master")
+    if ok and played and type(handle) == "number" then self.furyVoiceHandle = handle end
+end
+
+function SH.Encounter:SetFuryIndex(index)
+    self.furyIndex = index
+    SH.RoomMap:RefreshMythicPosition()
+    if SH.MythicPositionsUI then SH.MythicPositionsUI:Refresh() end
+end
+
+function SH.Encounter:TestFuryCountdown()
+    if not self.testMode then return false end
+    self.testFuryIndex = (self.testFuryIndex or 0) + 1
+    self:SetFuryIndex(self.testFuryIndex)
+    return self:WarnFury(5, true)
+end
+
+function SH.Encounter:WarnFury(seconds, isTest)
+    if (isTest and not self.testMode) or (not isTest and not self.active) then return false end
+    local options = SH.Store:Options()
+    if not isTest and not options.showFuryCountdown and not options.furyVoiceCountdown then return false end
+    self:CancelFuryCountdown()
+    seconds = math.max(0, math.min(5, seconds or 5))
+    local countdown = {endsAt = GetTime() + seconds, isTest = isTest}
+    self.furyCountdown = countdown
+    local function tick()
+        if SH.Encounter.furyCountdown ~= countdown then return end
+        SH.Encounter.timers.furyTick = nil
+        if (countdown.isTest and not SH.Encounter.testMode) or (not countdown.isTest and not SH.Encounter.active) then
+            SH.Encounter:CancelFuryCountdown()
+            return
+        end
+        local current = SH.Store:Options()
+        local show = current.showFuryCountdown or countdown.isTest
+        if not show and not current.furyVoiceCountdown then SH.Encounter:CancelFuryCountdown(); return end
+        local remaining = math.max(0, countdown.endsAt - GetTime())
+        local number = math.min(5, math.ceil(remaining))
+        if countdown.lastNumber ~= number then
+            countdown.lastNumber = number
+            if show then
+                if number > 0 then SH.PersonalWarning:Show("Stack in %d", number)
+                else SH.PersonalWarning:Show("Stack now") end
+            end
+            SH.Encounter:PlayFuryVoice(number, current.furyVoiceCountdown == true)
+        end
+        if number == 0 then SH.Encounter.furyCountdown = nil; return end
+        -- Only the five-second warning has work pending. No per-frame update loop.
+        local delay = math.max(0.01, math.min(1, remaining - (number - 1)))
+        SH.Encounter.timers.furyTick = C_Timer.NewTimer(delay, tick)
+    end
+    tick()
+    return true
 end
 
 function SH.Encounter:WarnSurge(index, isTest)
@@ -260,10 +339,16 @@ function SH.Encounter:ScheduleEvent(event)
             if SH.Encounter.active then SH.SurgeTargets:BeginCast(event.index) end
         end)
     end
-    if event.kind == "surge" then delay = delay - 3 end
+    if event.kind == "surge" then delay = delay - 3
+    elseif event.kind == "fury" then delay = delay - 5 end
     self.timers["schedule:" .. event.id] = C_Timer.NewTimer(math.max(0, delay), function()
         if not SH.Encounter.active then return end
         if event.kind == "surge" then SH.Encounter:WarnSurge(event.index, false)
+        elseif event.kind == "fury" then
+            -- Planning orientation follows the configured occurrence, even if
+            -- both warning displays are disabled. No live combat data is read.
+            SH.Encounter:SetFuryIndex(event.index)
+            SH.Encounter:WarnFury(math.max(0, event.time - (GetTime() - SH.Encounter.startedAt)), false)
         elseif event.kind == "wind" then SH.Encounter:WarnPush(event.index, false)
         elseif event.kind == "phaseReset" then SH.Encounter:ResetForNextPhase() end
     end)
@@ -365,6 +450,8 @@ function SH.Encounter:EnterTestMode()
     SH.Comms.receivedCount = 0
     SH.Comms.receivedMarkers = {}
     self.testMode = true
+    self.testFuryIndex = 0
+    self:SetFuryIndex(1)
     self.cycle = 1
     self.revision = 0
     self.assignments = {}
@@ -381,6 +468,8 @@ function SH.Encounter:QuitTestMode()
     self:CancelTimers()
     SH.PersonalWarning:Hide()
     self.testMode = false
+    self.testFuryIndex = nil
+    self:SetFuryIndex(1)
     self.assignments = {}
     self:RefreshDisplays()
     if SH.OptionsUI and SH.OptionsUI.testFrame then SH.OptionsUI.testFrame:Hide() end

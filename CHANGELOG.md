@@ -1,3 +1,14 @@
+## 12.1.7
+
+- Add Mythic Positions with fourteen damage spots, two tank soaks, and four reserved healer positions. Damage spots use numbers 1-14, with 14 marked FURY BAIT; tank and healer spots use role icons.
+- Assign unassigned raid members by role using movable circles and class-colored short names. Save full Name-Realm identities and separate position profiles; opening the tab takes one out-of-combat roster snapshot and leaves absent players' spots empty for replacement.
+- Use the saved raid arrangement as the default layout while preserving existing custom positions and assignments.
+- Let the raid leader publish complete or partly assigned plans before combat, including in Test Mode. Confirm receipt from other addon users, retry temporary messaging throttles, and preserve unsaved edits when a new plan arrives.
+- Add a room floor or outline, separate floor opacity, an outlined green assignment dot, and optional assignment labels and boss portrait. Move the entrance and exit markers outward for better visibility.
+- Add a Room Mini Map gear for display settings, including the clear button and wind order buttons. Hiding wind buttons preserves existing selections.
+- Alternate the boss and assigned point between Entrance and Exit with each scheduled Fury countdown, with manual overrides and a configurable starting side. Floor markers stay fixed; Test Mode previews both sides and Reset restores the starting side.
+- Add an editable five-second Fury stack countdown with optional synchronized voice cues. Show Stack in X and Stack now; short audio clips avoid speech-queue delays and stop on Reset, Quit, or encounter end.
+
 ## 12.1.6
 
 - Replace Double Row with a Rows dropdown for single, paired, or room-position layouts, preserving existing row settings.

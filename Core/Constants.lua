@@ -12,7 +12,9 @@ SH.Const = {
     ENCOUNTER_TIMES = {
         [14] = {surges = {36.25, 95, 188.3, 247, 340.3}, intermissions = {125, 277.1, 429.2}},
         [15] = {surges = {32.22, 84.44, 170.39, 222.64, 308.53, 360.72, 446.65}, intermissions = {111.17, 249.27, 387.42}},
-        [16] = {surges = {29, 77, 156, 203, 283, 330}, intermissions = {100.02, 227.02, 354.02}},
+        [16] = {surges = {29, 77, 156, 203, 283, 330}, intermissions = {100.02, 227.02, 354.02},
+            -- NSRT SerpentsFury alert endpoints, not the start of its display duration.
+            furies = {25.5, 72.5, 152.5, 199.5, 279.5, 326.6}},
     },
     EXIT_POSITION = 1,
     ENTRANCE_POSITION = 5,
@@ -61,7 +63,7 @@ function SH.Const:IntermissionEvents(index, start)
 end
 
 function SH.Const:SortSchedule(events)
-    local priority = {surge = 1, intermission = 2, wind = 3, phaseReset = 4}
+    local priority = {fury = 1, surge = 2, intermission = 3, wind = 4, phaseReset = 5}
     table.sort(events, function(a, b)
         if a.time == b.time then return priority[a.kind] < priority[b.kind] end
         return a.time < b.time
@@ -77,6 +79,9 @@ function SH.Const:DefaultSchedule(difficultyID)
     if not data then return events end
     for index, elapsed in ipairs(data.surges) do
         events[#events + 1] = {id = "surge" .. index, label = "Surge " .. index, kind = "surge", index = (index - 1) % 2 + 1, time = elapsed}
+    end
+    for index, elapsed in ipairs(data.furies or {}) do
+        events[#events + 1] = {id = "fury" .. index, label = "Serpent's Fury " .. index .. " - stack", kind = "fury", index = index, time = elapsed}
     end
     for index, elapsed in ipairs(data.intermissions) do
         for _, event in ipairs(self:IntermissionEvents(index, elapsed)) do events[#events + 1] = event end
