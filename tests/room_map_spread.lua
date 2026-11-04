@@ -15,6 +15,7 @@ UnitFullName = function(...) reads = reads + 1; return originalName(...) end
 check(options.roomMapBackground == "floor" and options.roomMapFloorOpacity == 0.6, "room-floor defaults missing")
 check(options.roomMapSpreadSide == "auto" and options.roomMapStartingSide == "entrance", "automatic entrance-first defaults missing")
 options.showMythicPosition, options.previewFrames = true, true
+options.roomMapShowBoss = true
 SH.MythicPositions.personal = {slot = 5, x = 0.4169, y = 0.7752}
 local point = SH.MythicPositions.personal
 map:ApplyFloorStyle()

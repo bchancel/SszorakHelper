@@ -10,18 +10,19 @@ local defaults = {
     version = 2,
     options = {
         showRoomMap = true,
-        showMythicPosition = false,
-        showWindOrderButtons = true,
+        showMythicPosition = true,
+        showWindOrderButtons = false,
         roomMapBackground = "floor",
         roomMapFloorOpacity = 0.6,
         roomMapShowAssignmentLabel = true,
-        roomMapShowBoss = true,
+        roomMapShowBoss = false,
         roomMapSpreadSide = "auto",
         roomMapStartingSide = "entrance",
         showOrderFrame = true,
-        showNSRTMacros = true,
+        showNSRTMacros = false,
         nsrtPanelOpen = false,
         nsrtAttachToMap = true,
+        nsrtButtonsOnMap = false,
         nsrtAutoShow = false,
         nsrtRows = 1,
         nsrtShowEntranceExit = false,
@@ -29,18 +30,17 @@ local defaults = {
         nsrtKeybindsEnabled = false,
         nsrtKeybinds = {},
         showSurgeTargets = false,
-        receiveNSRT = true,
         previewFrames = false,
         lockFrames = true,
         roomMapScale = 1,
         orderFrameScale = 1,
-        frameBackgroundOpacity = 0.5,
+        frameBackgroundOpacity = 0.75,
         minimapAngle = 220,
         raidWarningSurges = true,
         raidWarningPushes = false,
         showFuryCountdown = true,
         furyVoiceCountdown = false,
-        personalWarningFontSize = 32,
+        personalWarningFontSize = 40,
         personalWarningDelay = 4,
         -- Separate schema: old warning-delay settings are not elapsed timestamps.
         encounterSchedules = {},
@@ -166,6 +166,8 @@ function SH.Store:OnInitialize()
     local legacyLayout = validLayout(SszorakHelperDB.layout) and copy(SszorakHelperDB.layout) or copy(SH.Const.DEFAULT_LAYOUT)
     merge(SszorakHelperDB, copy(defaults))
     SszorakHelperDB.options.rotateMap = nil
+    SszorakHelperDB.options.receiveNSRT = nil
+    if SszorakHelperDB.options.lockFrames then SszorakHelperDB.options.previewFrames = false end
     normalizeProfiles(SszorakHelperDB, legacyLayout, hadProfiles)
     if SszorakHelperDB.temporaryLayout and not validLayout(SszorakHelperDB.temporaryLayout.layout) then
         SszorakHelperDB.temporaryLayout = nil

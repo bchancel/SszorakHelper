@@ -128,6 +128,7 @@ function SH.Widgets:Check(parent, text, onChanged)
     end
     check.SetChecked = function(self, value) original(self, value); refresh(self) end
     check:SetScript("OnClick", function(self)
+        if not self:IsEnabled() then return end
         refresh(self)
         if onChanged then onChanged(self:GetChecked() and true or false) end
     end)

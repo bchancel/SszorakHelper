@@ -29,7 +29,7 @@ end
 function SH.PersonalWarning:ApplyFontSize()
     if not self.frame then return end
     local options = SH.Store:Options()
-    local size = tonumber(options.personalWarningFontSize) or 32
+    local size = tonumber(options.personalWarningFontSize) or 40
     options.personalWarningFontSize = math.max(12, math.min(72, math.floor(size + 0.5)))
     self.frame.text:SetFont(STANDARD_TEXT_FONT, options.personalWarningFontSize, "OUTLINE")
 end

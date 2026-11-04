@@ -43,7 +43,7 @@ function SH.OrderFrame:ApplyScale()
 end
 
 function SH.OrderFrame:ApplyBackgroundOpacity()
-    local opacity = math.max(0, math.min(1, tonumber(SH.Store:Options().frameBackgroundOpacity) or 0.5))
+    local opacity = math.max(0, math.min(1, tonumber(SH.Store:Options().frameBackgroundOpacity) or 0.75))
     self.frame:SetBackdropColor(0.035, 0.064, 0.084, opacity)
 end
 

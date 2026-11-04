@@ -181,7 +181,7 @@ function SH.Encounter:RefreshDisplays()
         SH.OrderFrame:ShowPreview(previewDrops)
         SH.NSRTMacros:SetOrder(previewDrops)
     else
-        if (self.active or self.testMode) and SH.Store:Options().receiveNSRT and (SH.Comms.receivedCount or 0) > 0 then
+        if (self.active or self.testMode) and (SH.Comms.receivedCount or 0) > 0 then
             SH.OrderFrame:ShowReceived(SH.Comms.receivedMarkers, SH.Comms.receivedCount)
         else
             SH.OrderFrame:Update(nil)
@@ -291,7 +291,7 @@ function SH.Encounter:WarnSurge(index, isTest)
     local drops = self:ComputeDropOrder()
     if not drops then
         local first = index == 1 and 1 or 3
-        if showWarning and SH.Store:Options().receiveNSRT and (SH.Comms.receivedCount or 0) >= first then
+        if showWarning and (SH.Comms.receivedCount or 0) >= first then
             local markers = SH.Comms.receivedMarkers
             local second = first + 1
             if (SH.Comms.receivedCount or 0) >= second or second == 4 then
@@ -320,7 +320,7 @@ function SH.Encounter:WarnPush(index, isTest)
     local drops = self:ComputeDropOrder()
     local markerID = drops and drops[index]
     if not markerID then
-        if showWarning and SH.Store:Options().receiveNSRT and (SH.Comms.receivedCount or 0) >= index then
+        if showWarning and (SH.Comms.receivedCount or 0) >= index then
             SH.PersonalWarning:Show("Push toward |TInterface\\TargetingFrame\\UI-RaidTargetingIcon_%s:0|t", SH.Comms.receivedMarkers[index])
         end
         return

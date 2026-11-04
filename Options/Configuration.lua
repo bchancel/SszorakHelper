@@ -50,6 +50,7 @@ local function addToggle(parent, label, x, y, getter, setter)
     text:SetWidth(CELL_WIDTH - 82)
     local check = SH.Widgets:Check(cell, "", function(value)
         setter(value)
+        UI:RefreshDependentControls()
         SH.Encounter:RefreshDisplays()
     end)
     check:SetPoint("RIGHT", -12, 0)
@@ -59,16 +60,34 @@ local function addToggle(parent, label, x, y, getter, setter)
     return cell
 end
 
-local function toggleTooltip(cell, title, text)
+local function controlTooltip(cell, title, text, controls)
     cell.tooltipTitle, cell.tooltip = title, text
-    cell.check.tooltipTitle, cell.check.tooltip = title, text
     cell:EnableMouse(true)
-    for _, target in ipairs({cell, cell.check}) do
+    local targets = {cell}
+    for _, control in ipairs(controls or {}) do targets[#targets + 1] = control end
+    for _, target in ipairs(targets) do
+        target.tooltipTitle, target.tooltip = title, text
         target:SetScript("OnEnter", function(owner)
             SH.Widgets:ShowTooltip(owner, cell.tooltip, cell.tooltipTitle)
         end)
         target:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
+end
+
+local function toggleTooltip(cell, title, text)
+    controlTooltip(cell, title, text, {cell.check})
+end
+
+local function addGear(cell, onClick, tooltip)
+    cell.label:SetWidth(CELL_WIDTH - 112)
+    local gear = SH.Widgets:Button(cell, "", 26, 26, onClick, "secondary")
+    gear:SetPoint("RIGHT", -62, 0)
+    gear.icon = gear:CreateTexture(nil, "ARTWORK")
+    gear.icon:SetSize(20, 20)
+    gear.icon:SetPoint("CENTER")
+    gear.icon:SetTexture("Interface\\Buttons\\UI-OptionsButton")
+    gear.tooltip = tooltip
+    return gear
 end
 
 local function makeSection(parent, title, y, height)
@@ -92,6 +111,7 @@ local function addScaleControl(parent, label, x, y, getter, setter)
         end
     end)
     slider:SetPoint("RIGHT", -12, 0)
+    cell.slider = slider
     UI.scaleControls[#UI.scaleControls + 1] = {slider = slider, text = text, label = label, getter = getter}
     return cell
 end
@@ -113,6 +133,7 @@ local function addOpacityControl(parent, x, y, options)
         button:SetPoint("RIGHT", -12 - ((#OPACITY_VALUES - index) * 62), 0)
         UI.opacityButtons[index] = button
     end
+    controlTooltip(cell, "Background Opacity", "Opacity for all frames", UI.opacityButtons)
     return cell
 end
 
@@ -123,7 +144,7 @@ function UI:Ensure()
     frame:SetSize(930, 800)
     frame:SetFrameStrata("FULLSCREEN_DIALOG")
     frame:SetToplevel(true)
-    frame:SetClampedToScreen(true)
+    frame:SetClampedToScreen(false)
     frame:SetMovable(true)
     frame:EnableMouse(true)
     frame:Hide()
@@ -184,39 +205,37 @@ function UI:Ensure()
 
     local options = SH.Store:Options()
     self.scaleControls = {}
-    local frameSection = makeSection(content, "Frame Options", -6, 208)
-    addToggle(frameSection, "Preview Frames", CELL_LEFT, -34, function() return options.previewFrames end, function(v) options.previewFrames = v end)
-    addToggle(frameSection, "Lock Frames", CELL_RIGHT, -34, function() return options.lockFrames end, function(v) options.lockFrames = v end)
+    local frameSection = makeSection(content, "Frame Options", -6, 174)
+    local preview = addToggle(frameSection, "Preview Frames", CELL_LEFT, -34,
+        function() return options.previewFrames end, function(v) options.previewFrames = v and not options.lockFrames end)
+    toggleTooltip(preview, "Preview Frames", "See all Sszorak Helper Frames (Turn off when done)")
+    self.previewCell = preview
+    local lock = addToggle(frameSection, "Lock Frames", CELL_RIGHT, -34,
+        function() return options.lockFrames end, function(v)
+            options.lockFrames = v
+            if v then options.previewFrames = false end
+        end)
+    toggleTooltip(lock, "Lock Frames", "Disable to move around in preview mode")
+    self.lockFramesToggle = lock.check
     local roomMapCell = addToggle(frameSection, "Room Mini Map", CELL_LEFT, -68, function() return options.showRoomMap end, function(v) options.showRoomMap = v end)
-    roomMapCell.label:SetWidth(CELL_WIDTH - 112)
-    local roomMapGear = SH.Widgets:Button(roomMapCell, "", 26, 26, function() UI:ShowRoomMapDialog() end, "secondary")
-    roomMapGear:SetPoint("RIGHT", -62, 0)
-    roomMapGear.icon = roomMapGear:CreateTexture(nil, "ARTWORK")
-    roomMapGear.icon:SetSize(20, 20)
-    roomMapGear.icon:SetPoint("CENTER")
-    roomMapGear.icon:SetTexture("Interface\\Buttons\\UI-OptionsButton")
-    roomMapGear.tooltip = "Configure the clear button, your Mythic spread position, and wind order buttons."
-    self.roomMapGearButton = roomMapGear
-    addToggle(frameSection, "Wind Drop Order Frame", CELL_RIGHT, -68, function() return options.showOrderFrame end, function(v) options.showOrderFrame = v end)
-    addToggle(frameSection, "Surge Targets", CELL_LEFT, -102, function() return options.showSurgeTargets end, function(v) options.showSurgeTargets = v end)
-    addScaleControl(frameSection, "Map Scale", CELL_LEFT, -136, function() return options.roomMapScale end, function(v)
-        options.roomMapScale = v
-        SH.RoomMap:ApplyScale()
-        SH.NSRTMacros:ApplyScale()
-    end)
-    addScaleControl(frameSection, "Order Scale", CELL_RIGHT, -136, function() return options.orderFrameScale end, function(v)
-        options.orderFrameScale = v
-        SH.OrderFrame:ApplyScale()
-    end)
-    addOpacityControl(frameSection, CELL_LEFT, -170, options)
+    self.roomMapGearButton = addGear(roomMapCell, function() UI:ShowRoomMapDialog() end,
+        "Configure the room map display and scale.")
+    local order = addToggle(frameSection, "Wind Drop Order Frame", CELL_RIGHT, -68, function() return options.showOrderFrame end, function(v) options.showOrderFrame = v end)
+    toggleTooltip(order, "Wind Drop Order Frame", "Shows the wind order. Corresponds to surge drop locations and wind pushes for intermission.")
+    self.orderFrameGearButton = addGear(order, function() UI:ShowOrderFrameDialog() end, "Configure the wind drop order frame scale.")
+    local surge = addToggle(frameSection, "Surge Targets", CELL_LEFT, -102, function() return options.showSurgeTargets end, function(v) options.showSurgeTargets = v end)
+    toggleTooltip(surge, "Surge Targets", "Frame that shows Surges and marker assignments.")
+    addOpacityControl(frameSection, CELL_LEFT, -136, options)
 
-    local macros = makeSection(content, "NSRT Macro Buttons", -222, 140)
+    local macros = makeSection(content, "NSRT Macro Buttons", -188, 174)
     local macroEnable = addToggle(macros, "NSRT Macro Buttons", CELL_LEFT, -34, function() return options.showNSRTMacros end, function(v)
         options.showNSRTMacros = v
         UI.createMacrosButton:SetShown(v)
         if v then SH.NSRTMacros.inRoom = nil end
         SH.NSRTMacros:OnZoneChanged()
     end)
+    toggleTooltip(macroEnable, "NSRT Macro Buttons", "Enable to show the frame allowing you to send wind locations to others. Requires creating macros before combat begins.")
+    self.macroEnableToggle = macroEnable.check
     macroEnable.label:SetWidth(CELL_WIDTH - 152)
     local entranceExit = addToggle(macros, "Show Entrance / Exit", CELL_RIGHT, -34,
         function() return options.nsrtShowEntranceExit end,
@@ -228,16 +247,18 @@ function UI:Ensure()
     self.showEntranceExitToggle = entranceExit.check
     toggleTooltip(entranceExit, "Show Entrance / Exit",
         "Add the room's Exit and Entrance markers to the macro panel.\n\n1 row: Exit, then Entrance at the right.\n2 rows: Exit at the top right, Entrance at the bottom right.\n3 rows: Exit at the top right, Entrance at the middle right.\nChanges during combat apply after combat ends.")
-    addToggle(macros, "Attach to Map", CELL_LEFT, -68, function() return options.nsrtAttachToMap end, function(v)
+    local attach = addToggle(macros, "Attach to Map", CELL_LEFT, -68, function() return options.nsrtAttachToMap and not options.nsrtButtonsOnMap end, function(v)
         options.nsrtAttachToMap = v
         SH.NSRTMacros:ApplyAttachment()
     end)
-    addToggle(macros, "Auto Show / Hide by Room", CELL_RIGHT, -68, function() return options.nsrtAutoShow end, function(v)
+    self.attachToMapCell = attach
+    local autoShow = addToggle(macros, "Auto Show / Hide by Room", CELL_RIGHT, -68, function() return options.nsrtAutoShow end, function(v)
         options.nsrtAutoShow = v
         SH.NSRTMacros.inRoom = nil
         SH.NSRTMacros.lastSubzone = nil
         SH.NSRTMacros:OnZoneChanged()
     end)
+    toggleTooltip(autoShow, "Auto Show / Hide by Room", "Automatically shows the macros only in Sszorak's room")
     local rowsCell = optionCell(macros, CELL_LEFT, -102, CELL_WIDTH)
     cellLabel(rowsCell, "Rows")
     local rowsDropdown = SH.Widgets:Button(rowsCell, tostring(SH.Store:GetNSRTRows()), 80, 24,
@@ -249,6 +270,7 @@ function UI:Ensure()
     rowsDropdown.tooltipTitle = "Macro rows"
     rowsDropdown.tooltip = "1: Single row.\n2: Pairs opposite markers in two rows.\n3: Matches your relative room position in three rows.\n\nChanges during combat apply after combat ends."
     self.rowsDropdown = rowsDropdown
+    rowsDropdown._shEnabledStyle = "secondary"
     local createMacros = SH.Widgets:Button(macroEnable, "Create", 64, 24, function()
         SH.NSRTMacros:CreateOrRepairMacros()
         UI.oppositeMacrosToggle:SetChecked(options.nsrtOppositeMacros)
@@ -267,27 +289,35 @@ function UI:Ensure()
     toggleTooltip(oppositeMacros, "Opposite macros",
         "On: Send the opposite marker in the current layout.\nExample: Circle sends Square in Default.\n\nOff: Reset macros so each icon sends itself.\nChanges repair the eight NSRT macros. Out of combat only.")
     self.oppositeMacrosToggle = oppositeMacros.check
+    local buttonsOnMap = addToggle(macros, "Buttons on Map", CELL_LEFT, -136,
+        function() return options.nsrtButtonsOnMap end, function(value)
+            options.nsrtButtonsOnMap = value
+            if value then options.showRoomMap = true end
+            SH.NSRTMacros:ApplyScale()
+            SH.NSRTMacros:RefreshVisibility()
+            UI:Refresh()
+        end)
+    toggleTooltip(buttonsOnMap, "Buttons on Map",
+        "Click the room map markers to run the NSRT macros instead of using a separate panel.\nUses the same macros, Opposite macros setting, and keybinds.\nAttach to Map is disabled while active. Enable Show Entrance / Exit to make those markers clickable too.\nChanges during combat apply after combat ends; show the buttons before pulling.")
+    self.buttonsOnMapToggle = buttonsOnMap.check
+    self.macroOptionCells = {entranceExit, attach, autoShow, rowsCell, oppositeMacros, buttonsOnMap}
 
     local intermission = makeSection(content, "Intermission Options", -370, 70)
     addToggle(intermission, "Show Push Direction Warning", CELL_LEFT, -34, function() return options.raidWarningPushes end, function(v) options.raidWarningPushes = v end)
 
-    local other = makeSection(content, "Personal Warnings / NSRT", -448, 172)
+    local other = makeSection(content, "Personal Warnings", -448, 172)
     addToggle(other, "Show Drop Location Warning", CELL_LEFT, -34, function() return options.raidWarningSurges end, function(v) options.raidWarningSurges = v end)
     addToggle(other, "TTS Warnings", CELL_RIGHT, -34, function() return options.ttsWarnings end, function(v) options.ttsWarnings = v end)
-    local fontCell = optionCell(other, CELL_LEFT, -68, CELL_WIDTH)
+    local fontCell = optionCell(other, CELL_LEFT, -68, FULL_CELL_WIDTH)
     self.warningFontLabel = cellLabel(fontCell, "")
-    self.warningFontSlider = SH.Widgets:Slider(fontCell, 150, 12, 72, 1, function(value, userInput)
+    self.warningFontLabel:SetWidth(330)
+    self.warningFontSlider = SH.Widgets:Slider(fontCell, 280, 12, 72, 1, function(value, userInput)
         options.personalWarningFontSize = math.floor(value + 0.5)
         SH.PersonalWarning:ApplyFontSize()
         UI.warningFontLabel:SetText(string.format("Warning Font: %d px", options.personalWarningFontSize))
         if userInput then SH.PersonalWarning:Show("%s", "Personal warning preview") end
     end)
     self.warningFontSlider:SetPoint("RIGHT", -12, 0)
-    addToggle(other, "Receive NSRT Raid Messages", CELL_RIGHT, -68, function() return options.receiveNSRT end, function(v)
-        options.receiveNSRT = v
-        SH.Comms.receivedCount = 0
-        SH.Comms.receivedMarkers = {}
-    end)
     local delayCell = optionCell(other, CELL_LEFT, -102, FULL_CELL_WIDTH)
     self.warningDelayLabel = cellLabel(delayCell, "")
     self.warningDelayLabel:SetWidth(330)
@@ -511,6 +541,7 @@ function UI:Ensure()
     frame:SetScript("OnHide", function()
         menuDismiss:Hide()
         if UI.roomMapDialog then UI.roomMapDialog:Hide() end
+        if UI.orderFrameDialog then UI.orderFrameDialog:Hide() end
         UI:CancelKeybindCapture()
     end)
     frame:RegisterForDrag("LeftButton")
@@ -540,6 +571,7 @@ function UI:SelectPage(page)
     self.page = (page == "layout" or (page == "mythic" and self.mythicPage)) and page or "configuration"
     self.profileMenuDismiss:Hide()
     if self.roomMapDialog then self.roomMapDialog:Hide() end
+    if self.orderFrameDialog then self.orderFrameDialog:Hide() end
     self:CancelKeybindCapture()
     self.selectedLayoutPosition = nil
     local layout = self.page == "layout"
@@ -556,6 +588,7 @@ function UI:SelectPage(page)
 end
 
 function UI:ShowRoomMapDialog()
+    if self.orderFrameDialog then self.orderFrameDialog:Hide() end
     if not self.roomMapDialog then
         local shade = CreateFrame("Frame", nil, self.frame, "BackdropTemplate")
         shade:SetAllPoints(self.frame)
@@ -563,7 +596,7 @@ function UI:ShowRoomMapDialog()
         shade:EnableMouse(true)
         SH.Widgets:ApplyBackdrop(shade, SH.Widgets.colors.overlay, SH.Widgets.colors.transparent)
         local panel = CreateFrame("Frame", nil, shade, "BackdropTemplate")
-        panel:SetSize(380, 520)
+        panel:SetSize(380, 566)
         panel:SetPoint("CENTER")
         SH.Widgets:ApplyBackdrop(panel, SH.Widgets.colors.canvasAlt, SH.Widgets.colors.borderStrong)
         local title = SH.Widgets:Text(panel, "Room Mini Map", true)
@@ -583,6 +616,8 @@ function UI:ShowRoomMapDialog()
                     UI:RefreshRoomMapControls()
                 end, "secondary")
                 button:SetPoint("TOPLEFT", 18 + (i - 1) * 116, y - 21)
+                button.tooltipTitle = label
+                button.tooltip = definition[3]
                 buttons[#buttons + 1] = {button = button, value = value}
             end
             return buttons
@@ -614,12 +649,23 @@ function UI:ShowRoomMapDialog()
         local winds = addToggle(panel, "Show wind order buttons", 18, -296,
             function() return options.showWindOrderButtons ~= false end, function(value) options.showWindOrderButtons = value end)
         toggleTooltip(winds, "Wind order buttons", "Show the 1, 2, 3 selection buttons below each side marker. Turning them off keeps the markers and current wind assignments visible.")
-        self.roomMapChoices.roomMapSpreadSide = choices("Spread side", -343, "roomMapSpreadSide", {{"auto", "Automatic"}, {"entrance", "Entrance"}, {"exit", "Exit"}})
-        self.roomMapChoices.roomMapStartingSide = choices("Automatic starting side", -405, "roomMapStartingSide", {{"entrance", "Entrance"}, {"exit", "Exit"}})
+        self.roomMapChoices.roomMapSpreadSide = choices("Spread side", -343, "roomMapSpreadSide", {
+            {"auto", "Automatic", "Alternate Entrance and Exit with each scheduled Fury countdown."},
+            {"entrance", "Entrance", "Keep your spread position and boss landmark oriented toward the Entrance."},
+            {"exit", "Exit", "Keep your spread position and boss landmark oriented toward the Exit."}})
+        self.roomMapChoices.roomMapStartingSide = choices("Automatic starting side", -405, "roomMapStartingSide", {
+            {"entrance", "Entrance", "Start Automatic at Entrance, then alternate with each Fury countdown. Resets at pull."},
+            {"exit", "Exit", "Start Automatic at Exit, then alternate with each Fury countdown. Resets at pull."}})
         self.roomMapSideHint = SH.Widgets:Label(panel, "Changes with each Fury countdown; resets at pull.")
         self.roomMapSideHint:SetPoint("TOPLEFT", 18, -463)
         self.roomMapSideHint:SetWidth(344)
         self.roomMapSideHint:SetFont(STANDARD_TEXT_FONT, 11)
+        self.roomMapScaleCell = addScaleControl(panel, "Map Scale", 18, -484,
+            function() return options.roomMapScale end, function(v)
+                options.roomMapScale = v
+                SH.RoomMap:ApplyScale()
+                SH.NSRTMacros:ApplyScale()
+            end)
         local close = SH.Widgets:Button(panel, "Close", 100, 28, function() shade:Hide() end, "secondary")
         close:SetPoint("BOTTOMRIGHT", -18, 18)
         shade.close = close
@@ -628,6 +674,56 @@ function UI:ShowRoomMapDialog()
     end
     self:Refresh()
     self.roomMapDialog:Show()
+end
+
+function UI:ShowOrderFrameDialog()
+    if self.roomMapDialog then self.roomMapDialog:Hide() end
+    if not self.orderFrameDialog then
+        local shade = CreateFrame("Frame", nil, self.frame, "BackdropTemplate")
+        shade:SetAllPoints(self.frame)
+        shade:SetFrameLevel(self.frame:GetFrameLevel() + 50)
+        shade:EnableMouse(true)
+        SH.Widgets:ApplyBackdrop(shade, SH.Widgets.colors.overlay, SH.Widgets.colors.transparent)
+        local panel = CreateFrame("Frame", nil, shade, "BackdropTemplate")
+        panel:SetSize(380, 150)
+        panel:SetPoint("CENTER")
+        SH.Widgets:ApplyBackdrop(panel, SH.Widgets.colors.canvasAlt, SH.Widgets.colors.borderStrong)
+        local title = SH.Widgets:Text(panel, "Wind Drop Order Frame", true)
+        title:SetPoint("TOPLEFT", 18, -18)
+        local options = SH.Store:Options()
+        self.orderFrameScaleCell = addScaleControl(panel, "Order Scale", 18, -55,
+            function() return options.orderFrameScale end, function(v)
+                options.orderFrameScale = v
+                SH.OrderFrame:ApplyScale()
+            end)
+        local close = SH.Widgets:Button(panel, "Close", 100, 28, function() shade:Hide() end, "secondary")
+        close:SetPoint("BOTTOMRIGHT", -18, 18)
+        shade.close = close
+        self.orderFrameDialog = shade
+    end
+    self:Refresh()
+    self.orderFrameDialog:Show()
+end
+
+function UI:RefreshDependentControls()
+    local options = SH.Store:Options()
+    if self.previewCell then
+        self.previewCell.check:SetChecked(options.previewFrames)
+        self.previewCell.check:SetEnabled(not options.lockFrames)
+        self.previewCell:SetAlpha(options.lockFrames and 0.4 or 1)
+    end
+    local enabled = options.showNSRTMacros
+    for _, cell in ipairs(self.macroOptionCells or {}) do
+        local editable = enabled and (cell ~= self.attachToMapCell or not options.nsrtButtonsOnMap)
+        cell:SetAlpha(editable and 1 or 0.4)
+        local check = rawget(cell, "check")
+        if check then check:SetEnabled(editable) end
+    end
+    if self.attachToMapCell then
+        self.attachToMapCell.check:SetChecked(options.nsrtAttachToMap and not options.nsrtButtonsOnMap)
+    end
+    if self.rowsDropdown then SH.Widgets:SetEnabled(self.rowsDropdown, enabled) end
+    if not enabled and self.rowsMenu and self.rowsMenu:IsShown() then self.profileMenuDismiss:Hide() end
 end
 
 function UI:RefreshRoomMapControls()
@@ -795,6 +891,7 @@ function UI:RefreshRowsControl()
 end
 
 function UI:ToggleRowsMenu()
+    if not SH.Store:Options().showNSRTMacros then return end
     local open = not (self.profileMenuDismiss:IsShown() and self.rowsMenu:IsShown())
     self:RefreshRowsControl()
     self.profileMenu:Hide()
@@ -1146,7 +1243,7 @@ end
 
 function UI:RefreshOpacityControl()
     if not self.opacityButtons then return end
-    local selected = tonumber(SH.Store:Options().frameBackgroundOpacity) or 0.5
+    local selected = tonumber(SH.Store:Options().frameBackgroundOpacity) or 0.75
     for index, button in ipairs(self.opacityButtons) do
         SH.Widgets:StyleButton(button, math.abs(OPACITY_VALUES[index] - selected) < 0.01 and "primary" or "secondary")
     end
@@ -1184,6 +1281,7 @@ function UI:Refresh()
     for _, entry in ipairs(self.optionChecks) do entry.check:SetChecked(entry.getter()) end
     self.createMacrosButton:SetShown(SH.Store:Options().showNSRTMacros)
     self:RefreshRowsControl()
+    self:RefreshDependentControls()
     for _, entry in ipairs(self.scaleControls) do
         local value = tonumber(entry.getter()) or 1
         entry.slider._shUpdating = true

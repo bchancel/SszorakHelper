@@ -52,7 +52,7 @@ function SH.SurgeTargets:OnInitialize()
 end
 
 function SH.SurgeTargets:ApplyBackgroundOpacity()
-    local opacity = math.max(0, math.min(1, tonumber(SH.Store:Options().frameBackgroundOpacity) or 0.5))
+    local opacity = math.max(0, math.min(1, tonumber(SH.Store:Options().frameBackgroundOpacity) or 0.75))
     self.frame:SetBackdropColor(0.035, 0.064, 0.084, opacity)
 end
 
@@ -88,7 +88,7 @@ function SH.SurgeTargets:GetMarker(position)
     if position == 4 then return SH.Store:GetLayout()[SH.Const.EXIT_POSITION], true end
     local drops = SH.Encounter:ComputeDropOrder()
     if drops then return drops[position], true end
-    if SH.Store:Options().receiveNSRT and (SH.Comms.receivedCount or 0) > 0 then
+    if (SH.Comms.receivedCount or 0) > 0 then
         if position <= SH.Comms.receivedCount then return SH.Comms.receivedMarkers[position], true end
         return nil, false
     end

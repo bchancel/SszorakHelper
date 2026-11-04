@@ -73,6 +73,7 @@ function SH.NSRTMacros:ShouldShow()
     if self.panelHidden then return false end
     local options = SH.Store:Options()
     local encounter = SH.Encounter
+    if options.nsrtButtonsOnMap and not options.showRoomMap then return false end
     return options.showNSRTMacros and ((encounter and encounter.testMode) or options.previewFrames
         or (options.nsrtPanelOpen and self:IsSupportedInstance()))
 end
@@ -122,6 +123,7 @@ function SH.NSRTMacros:SetPanelOpen(open)
     self.panelHidden = not options.nsrtPanelOpen
     if options.nsrtPanelOpen then options.showNSRTMacros = true end
     self:RefreshVisibility()
+    SH.RoomMap:RefreshVisibility()
     SH:Print(options.nsrtPanelOpen and "Macro panel enabled for this raid. Show it before pulling Sszorak."
         or "Macro panel hidden. Right-click the minimap button or use /sh macros to reopen it.")
     if InCombatLockdown() then SH:Print("Panel visibility will change after combat ends.") end
@@ -247,6 +249,10 @@ function SH.NSRTMacros:OnInitialize()
             if mouseButton == "LeftButton" and not down then SH.NSRTMacros:OnMacroClicked(index) end
         end)
         button:SetScript("OnEnter", function()
+            if not SH.NSRTMacros.available[index] then
+                SH.Widgets:ShowTooltip(button, "Use Create in Configuration before combat.", "NSRT macro unavailable")
+                return
+            end
             local markerID = SH.NSRTMacros.sentMarkerIDs[index]
             local displayID = SH.NSRTMacros.markerIDs[index]
             GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
@@ -282,6 +288,8 @@ function SH.NSRTMacros:OnInitialize()
         SH.NSRTMacros:RefreshVisibility()
     end)
     SH:RegisterEvent("PLAYER_REGEN_ENABLED", function()
+        SH.RoomMap:ApplyScale()
+        SH.RoomMap:RefreshLayout()
         SH.NSRTMacros:ApplyAttachment()
         SH.NSRTMacros:ApplyScale()
         SH.NSRTMacros:RefreshLayout()
@@ -292,12 +300,15 @@ end
 function SH.NSRTMacros:ApplyAttachment()
     if not self.frame or InCombatLockdown() then return end
     local options = SH.Store:Options()
-    local attached = options.nsrtAttachToMap
+    self.buttonsOnMap = options.nsrtButtonsOnMap == true
+    local attached = options.nsrtAttachToMap and not self.buttonsOnMap
     -- A detached panel can overlap Configuration. Keep the preview draggable above it,
     -- including when Configuration is raised again, with both click and visual layers together.
     local strata = options.previewFrames and not attached and "TOOLTIP" or "HIGH"
     self.frame:SetFrameStrata(strata)
-    self.secureFrame:SetFrameStrata(strata)
+    self.secureFrame:SetFrameStrata(self.buttonsOnMap and SH.RoomMap.frame:GetFrameStrata() or strata)
+    self.secureFrame:SetFrameLevel(self.buttonsOnMap and SH.RoomMap.frame:GetFrameLevel() + 10 or 100)
+    self.secureFrame:SetClampedToScreen(not self.buttonsOnMap)
     if self.attached ~= attached then
         local centerX, centerY
         if self.attached and not attached then centerX, centerY = self.frame:GetCenter() end
@@ -319,9 +330,12 @@ end
 
 function SH.NSRTMacros:ApplySecurePosition()
     if not self.frame or not self.secureFrame or InCombatLockdown() then return end
-    local centerX, centerY = self.frame:GetCenter()
+    -- Anchor independently to UIParent so secure clicks do not protect the map's
+    -- ordinary visibility, labels, assignment controls, or planning landmarks.
+    local source = self.buttonsOnMap and SH.RoomMap.frame or self.frame
+    local centerX, centerY = source:GetCenter()
     if not centerX or not centerY then return end
-    local frameScale = self.frame:GetEffectiveScale()
+    local frameScale = source:GetEffectiveScale()
     local uiScale = UIParent:GetEffectiveScale()
     centerX = centerX * frameScale / uiScale
     centerY = centerY * frameScale / uiScale
@@ -336,6 +350,7 @@ function SH.NSRTMacros:ApplyScale()
         self.pendingSecureRefresh = true
         return
     end
+    self:ApplyAttachment()
     self.rows = SH.Store:GetNSRTRows()
     self.showEntranceExit = SH.Store:Options().nsrtShowEntranceExit == true
     local columns
@@ -357,6 +372,12 @@ function SH.NSRTMacros:ApplyScale()
     self.frame:SetScale(scale)
     self.secureFrame:SetScale(1)
     self.secureFrame:SetSize(width * scale, height * scale)
+    local mapScale
+    if self.buttonsOnMap then
+        local map = SH.RoomMap.frame
+        mapScale = map:GetEffectiveScale() / UIParent:GetEffectiveScale()
+        self.secureFrame:SetSize(map:GetWidth() * mapScale, map:GetHeight() * mapScale)
+    end
     for slotIndex, button in ipairs(self.secureFrame.buttons) do
         local x, y = slotPoint(slotIndex, self.rows)
         local slot = self.frame.slots[slotIndex]
@@ -368,21 +389,27 @@ function SH.NSRTMacros:ApplyScale()
         slot.blocker:ClearAllPoints()
         slot.blocker:SetPoint("BOTTOMLEFT", x, y)
         button:ClearAllPoints()
-        button:SetSize(SLOT_WIDTH * scale, SLOT_HEIGHT * scale)
-        button:SetPoint("BOTTOMLEFT", x * scale, y * scale)
+        if self.buttonsOnMap then
+            local mapX, mapY = SH.RoomMap:GetMarkerPoint(MACRO_POSITIONS[slotIndex])
+            button:SetSize(32 * mapScale, 32 * mapScale)
+            button:SetPoint("CENTER", self.secureFrame, "CENTER", mapX * mapScale, mapY * mapScale)
+        else
+            button:SetSize(SLOT_WIDTH * scale, SLOT_HEIGHT * scale)
+            button:SetPoint("BOTTOMLEFT", x * scale, y * scale)
+        end
     end
     self:ApplySecurePosition()
 end
 
 function SH.NSRTMacros:ApplyBackgroundOpacity()
     if not self.frame then return end
-    local opacity = math.max(0, math.min(1, tonumber(SH.Store:Options().frameBackgroundOpacity) or 0.5))
+    local opacity = math.max(0, math.min(1, tonumber(SH.Store:Options().frameBackgroundOpacity) or 0.75))
     self.frame:SetBackdropColor(0.035, 0.064, 0.084, opacity)
 end
 
 function SH.NSRTMacros:SetUnlocked(unlocked)
     if not self.frame then return end
-    unlocked = unlocked and not SH.Store:Options().nsrtAttachToMap
+    unlocked = unlocked and not (SH.Store:Options().nsrtAttachToMap and not self.buttonsOnMap)
     self.frame._shUnlocked = unlocked and true or false
     self.frame:SetBackdropBorderColor(unpack(unlocked and SH.Widgets.colors.accentBright or SH.Widgets.colors.borderStrong))
 end
@@ -464,6 +491,12 @@ function SH.NSRTMacros:RefreshHighlights()
             isNext and SH.Widgets.colors.pinkBorder or (completed and SH.Widgets.colors.successBorder or SH.Widgets.colors.border))
         -- Suggestions are visual only. Keep working macros clickable for retries.
         slot.blocker:SetShown(slot:IsShown() and not self.available[slotIndex])
+        local groups = rawget(SH.RoomMap.frame, "groups")
+        local group = groups and groups[MACRO_POSITIONS[slotIndex]]
+        if group then
+            local mapButton = self.buttonsOnMap and self.secureFrame:IsShown() and self.secureFrame.buttons[slotIndex]:IsShown()
+            group.marker:SetAlpha(mapButton and not self.available[slotIndex] and 0.3 or 1)
+        end
     end
 end
 
@@ -472,11 +505,12 @@ function SH.NSRTMacros:RefreshVisibility()
     if not self:IsSupportedInstance() then SH.Store:Options().nsrtPanelOpen = false end
     local shouldShow = self:ShouldShow()
     if InCombatLockdown() then
-        self.frame:SetShown(self.secureFrame:IsShown())
+        self.frame:SetShown(not self.buttonsOnMap and self.secureFrame:IsShown())
         return
     end
+    if self.buttonsOnMap ~= (SH.Store:Options().nsrtButtonsOnMap == true) then self:ApplyScale() end
     self:ApplyAttachment()
-    self.frame:SetShown(shouldShow)
+    self.frame:SetShown(shouldShow and not self.buttonsOnMap)
     self.secureFrame:SetShown(shouldShow)
     if shouldShow then
         self:ApplySecurePosition()
@@ -484,4 +518,5 @@ function SH.NSRTMacros:RefreshVisibility()
     elseif SH.Keybinds then
         SH.Keybinds:Refresh()
     end
+    self:RefreshHighlights()
 end

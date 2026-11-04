@@ -134,7 +134,7 @@ function SH.Comms:OnAddonMessage(message, sender)
 end
 
 function SH.Comms:OnRaidMessage(message)
-    if not (SH.Encounter and (SH.Encounter.active or SH.Encounter.testMode)) or not SH.Store:Options().receiveNSRT then return end
+    if not (SH.Encounter and (SH.Encounter.active or SH.Encounter.testMode)) then return end
     -- Secret chat can be passed to a display API, never parsed or compared.
     -- As in NSRT, every raid/raid-leader message consumes a display slot.
     -- The raid must use one caller and keep these channels clear of other text.

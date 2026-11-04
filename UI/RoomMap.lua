@@ -226,13 +226,23 @@ function SH.RoomMap:RefreshMythicPosition()
 end
 
 function SH.RoomMap:ApplyScale()
+    if InCombatLockdown() and SH.NSRTMacros and SH.NSRTMacros.buttonsOnMap then
+        SH.NSRTMacros.pendingSecureRefresh = true
+        return
+    end
     self.frame:SetScale((SH.Store:Options().roomMapScale or 1) * SH.Const.FRAME_SCALE_BASE)
 end
 
 function SH.RoomMap:ApplyBackgroundOpacity()
-    local opacity = math.max(0, math.min(1, tonumber(SH.Store:Options().frameBackgroundOpacity) or 0.5))
+    local opacity = math.max(0, math.min(1, tonumber(SH.Store:Options().frameBackgroundOpacity) or 0.75))
     self.frame:SetBackdropColor(0.035, 0.064, 0.084, opacity)
     self.frame.circle:SetVertexColor(0.025, 0.05, 0.065, 0)
+end
+
+function SH.RoomMap:GetMarkerPoint(position)
+    local endpoint = position == SH.Const.EXIT_POSITION or position == SH.Const.ENTRANCE_POSITION
+    local x, y = pointFor(position, endpoint and END_MARKER_RADIUS or MAP_RADIUS)
+    return x, y - 5
 end
 
 function SH.RoomMap:Reposition()
@@ -245,15 +255,15 @@ function SH.RoomMap:Reposition()
         edge:SetEndPoint("CENTER", self.frame, "CENTER", (vertices[nextIndex][1] - 0.5) * FLOOR_WIDTH, (0.5 - vertices[nextIndex][2]) * FLOOR_HEIGHT + centerY)
     end
     for position, group in ipairs(self.frame.groups) do
-        local endpoint = position == SH.Const.EXIT_POSITION or position == SH.Const.ENTRANCE_POSITION
-        local x, y = pointFor(position, endpoint and END_MARKER_RADIUS or MAP_RADIUS)
+        local x, y = self:GetMarkerPoint(position)
         group:ClearAllPoints()
         -- A group's marker sits 17 pixels above its center; align the icon to the floor.
-        group:SetPoint("CENTER", self.frame, "CENTER", x, y + centerY - 17)
+        group:SetPoint("CENTER", self.frame, "CENTER", x, y - 17)
     end
 end
 
 function SH.RoomMap:RefreshLayout()
+    if InCombatLockdown() and SH.NSRTMacros and SH.NSRTMacros.buttonsOnMap then return end
     local layout = SH.Store:GetLayout()
     for position, group in ipairs(self.frame.groups) do
         local markerID = tonumber(layout[position]) or position
@@ -300,9 +310,12 @@ end
 
 function SH.RoomMap:RefreshVisibility()
     local options = SH.Store:Options()
-    local autoShown = options.nsrtAutoShow and SH.NSRTMacros and SH.NSRTMacros.autoRoomVisible
-    local context = (SH.Encounter and SH.Encounter.active) or (SH.Encounter and SH.Encounter.testMode) or options.previewFrames or autoShown
+    local macros = SH.NSRTMacros
+    local autoShown = options.nsrtAutoShow and macros and macros.autoRoomVisible
+    local macroShown = options.nsrtButtonsOnMap and macros and macros:ShouldShow()
+    local pinned = InCombatLockdown() and macros and macros.buttonsOnMap and macros.secureFrame:IsShown()
+    local context = (SH.Encounter and SH.Encounter.active) or (SH.Encounter and SH.Encounter.testMode) or options.previewFrames or autoShown or macroShown
     self:SetUnlocked(context and not options.lockFrames)
-    self.frame:SetShown(context and options.showRoomMap)
+    self.frame:SetShown(pinned or (context and options.showRoomMap))
     self:RefreshMythicPosition()
 end

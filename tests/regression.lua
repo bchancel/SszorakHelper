@@ -125,6 +125,7 @@ function frameMethods:SetFont(path, size) self.fontSize = size end
 function frameMethods:SetTexture(value) self.textureValue = value end
 function frameMethods:GetTexture() return self.textureValue end
 function frameMethods:SetAlpha(value) self.alphaValue = value end
+function frameMethods:SetClampedToScreen(value) self.clamped = value end
 function frameMethods:GetAlpha() return self.alphaValue or 1 end
 function frameMethods:GetCenter() return rawget(self, "centerX") or 400, rawget(self, "centerY") or 300 end
 function frameMethods:GetEffectiveScale() return (rawget(self, "scale") or 1) * (self.parent and self.parent:GetEffectiveScale() or 1) end
@@ -152,15 +153,26 @@ local function loadModule(path) assert(loadfile(path))("SszorakHelper", SH) end
 loadModule("Core/Constants.lua")
 loadModule("Core/Store.lua")
 SH.Store:OnInitialize()
-check(SH.Store:Options().frameBackgroundOpacity == 0.5, "fresh opacity must be 50 percent")
+check(SH.Store:Options().frameBackgroundOpacity == 0.75, "fresh opacity must be 75 percent")
+local fresh = SH.Store:Options()
+check(fresh.showRoomMap and fresh.showMythicPosition and fresh.roomMapShowAssignmentLabel, "default map displays missing")
+check(not fresh.showClearButton and not fresh.showWindOrderButtons and not fresh.roomMapShowBoss, "default map controls should be hidden")
+check(fresh.roomMapScale == 1 and fresh.roomMapBackground == "floor" and fresh.roomMapFloorOpacity == 0.6, "default map appearance incorrect")
+check(fresh.showOrderFrame and not fresh.showSurgeTargets and not fresh.showNSRTMacros, "default frame visibility incorrect")
+check(fresh.raidWarningSurges and not fresh.ttsWarnings and fresh.personalWarningFontSize == 40 and fresh.personalWarningDelay == 4, "default warnings incorrect")
+check(fresh.showFuryCountdown and not fresh.furyVoiceCountdown, "default Fury settings incorrect")
 SH.Store:Options().frameBackgroundOpacity = 0.25
 SH.Store:Options().rotateMap = true
+SH.Store:Options().receiveNSRT = false
+SH.Store:Options().previewFrames = true
 SH.Store:Options().observedSchedules[14] = {
     {id = "intermission4rotationStop", kind = "rotationStop", time = 600},
 }
 SH.Store:OnInitialize()
 check(SH.Store:Options().frameBackgroundOpacity == 0.25, "saved opacity was overwritten")
 check(SH.Store:Options().rotateMap == nil, "removed rotation option survived migration")
+check(SH.Store:Options().receiveNSRT == nil, "removed NSRT opt-out survived migration")
+check(not SH.Store:Options().previewFrames, "saved preview remained active while locked")
 for _, event in ipairs(SH.Store:GetTimings(14)) do
     check(event.kind ~= "rotationStop", "removed rotation event remained in schedule editor")
 end
@@ -258,7 +270,12 @@ SH.Comms:OnRaidMessage(values[1], secret())
 check(SH.Comms.receivedCount == 1, "next batch did not restart")
 SH.Store:Options().receiveNSRT = false
 SH.Comms:OnRaidMessage(values[2], secret())
-check(SH.Comms.receivedCount == 1, "disabled receiver consumed chat")
+check(SH.Comms.receivedCount == 2, "legacy opt-out disabled the always-on receiver")
+SH.Encounter:RefreshDisplays()
+check(SH.OrderFrame.receivedCount == 2, "legacy opt-out hid the received order")
+SH.Encounter:WarnPush(2, false)
+check(SH.PersonalWarning.frame.text.formatted[2] == values[2], "legacy opt-out disabled received warnings")
+SH.Store:Options().receiveNSRT = nil
 SH.Encounter:Stop()
 check(not SH.PersonalWarning.frame:IsShown(), "warning lingered after encounter")
 check(SH.Comms.receivedCount == 0, "received batch survived encounter")
@@ -308,7 +325,6 @@ check(not SH.NSRTMacros.available[1], "raid test pretended a missing macro works
 -- Two test-mode clients use the actual raid-event receiver. The transport here
 -- simulates delivery; protected hardware execution must also be tested in WoW.
 macros.NSRT_SSZORAK_6 = "/raid 6"
-SH.Store:Options().receiveNSRT = true
 SH.Encounter:EnterTestMode()
 SH.NSRTMacros:RefreshLayout()
 local recipientHandlers = {}
@@ -1307,6 +1323,13 @@ check(not ui.clearKeybindsButton:IsEnabled() and ui.layoutButtons[6].keybind.tex
 SH.Keybinds:SetEnabled(false)
 
 assert(loadfile("tests/room_map_options.lua"))(SH)
+assert(loadfile("tests/configuration_controls.lua"))(SH)
+assert(loadfile("tests/map_macros.lua"))(SH, {
+    setCombat = function(value) combat = value end,
+    setRaid = function(value) inRaid = value end,
+    fire = function(event) for _, callback in ipairs(handlers[event] or {}) do callback() end end,
+    macros = macros,
+})
 assert(loadfile("tests/fury_countdown.lua"))(SH)
 assert(loadfile("tests/room_map_spread.lua"))(SH)
 assert(loadfile("tests/mythic_transfer.lua"))()

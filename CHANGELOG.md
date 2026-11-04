@@ -1,3 +1,12 @@
+## 12.1.8
+
+- Add Buttons on Map to send NSRT macros by clicking room-map markers, using the same keybinds and Opposite macros setting as the separate panel.
+- Disable Attach to Map while Buttons on Map is active, restoring the saved attachment preference when switched off. Apply mode and scale changes after combat to keep clicks aligned.
+- Move map and wind-order scale sliders into their gear menus, add hover help, and allow dragging Configuration beyond the screen edges.
+- Always receive NSRT raid messages and grey out dependent macro controls when macro buttons are disabled.
+- Turn off Preview Frames while frames are locked, and enable its toggle again when unlocked.
+- Update new settings to show Mythic spread positions, hide boss landmarks, wind selection buttons, and macro buttons, and use 75% frame opacity with 40-pixel warning text. Preserve existing saved preferences.
+
 ## 12.1.7
 
 - Add Mythic Positions with fourteen damage spots, two tank soaks, and four reserved healer positions. Damage spots use numbers 1-14, with 14 marked FURY BAIT; tank and healer spots use role icons.
