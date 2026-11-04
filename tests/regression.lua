@@ -126,7 +126,7 @@ function frameMethods:SetTexture(value) self.textureValue = value end
 function frameMethods:GetTexture() return self.textureValue end
 function frameMethods:SetAlpha(value) self.alphaValue = value end
 function frameMethods:SetClampedToScreen(value) self.clamped = value end
-function frameMethods:GetAlpha() return self.alphaValue or 1 end
+function frameMethods:GetAlpha() return rawget(self, "alphaValue") or 1 end
 function frameMethods:GetCenter() return rawget(self, "centerX") or 400, rawget(self, "centerY") or 300 end
 function frameMethods:GetEffectiveScale() return (rawget(self, "scale") or 1) * (self.parent and self.parent:GetEffectiveScale() or 1) end
 function frameMethods:SetScale(value) protected(self); self.scale = value end
@@ -1331,7 +1331,15 @@ assert(loadfile("tests/map_macros.lua"))(SH, {
     macros = macros,
 })
 assert(loadfile("tests/fury_countdown.lua"))(SH)
+assert(loadfile("tests/wind_warnings.lua"))(SH)
 assert(loadfile("tests/room_map_spread.lua"))(SH)
+assert(loadfile("tests/mythic_groups.lua"))(SH, {
+    setCombat = function(value) combat = value end,
+    setLockdown = function(value) lockdown = value end,
+    setRaid = function(value) inRaid = value end,
+    fire = function(event) for _, callback in ipairs(handlers[event] or {}) do callback() end end,
+    secret = secret,
+})
 assert(loadfile("tests/mythic_transfer.lua"))()
 assert(loadfile("tests/mythic_positions.lua"))(SH, {
     setCombat = function(value) combat = value end,

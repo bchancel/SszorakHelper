@@ -1,3 +1,10 @@
+## 12.1.10
+
+- Add Organize Groups to Mythic Positions for raid leaders and assistants. Arrange groups 1-4 from the displayed assignments, following the saved formation, with missing-player handling and swaps for full groups.
+- Label Buttons on Map as Experimental.
+- Let enabling Preview Frames turn off Lock Frames, and enabling Lock Frames turn off preview.
+- Show Mythic intermission wind warnings two seconds earlier and keep them visible two seconds longer.
+
 ## 12.1.9
 
 - Keep Mythic spread markers on the same left/right side of the room when switching between Entrance and Exit. Lower-left assignments now become upper-left instead of upper-right.

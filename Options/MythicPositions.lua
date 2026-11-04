@@ -154,6 +154,7 @@ function UI:Create(options)
         button:SetScript("OnEnter", function(owner)
             local member = UI.draft and UI.draft.slots[slot].member
             local message = positionRole(slot) .. (slot == M.BAIT_SLOT and " (next cast)" or "") .. "\n" .. (member and member.name or "Unassigned")
+            message = message .. "\nRaid group " .. M:GroupForSlot(slot)
             if UI.draft and UI.draft.previous[slot] and not member then message = message .. "\nPreviously: " .. UI.draft.previous[slot] end
             SH.Widgets:ShowTooltip(owner, message, M:PositionLabel(slot))
         end)
@@ -214,6 +215,13 @@ function UI:Create(options)
     self.save:SetPoint("BOTTOMLEFT", 22, 0)
     self.revert = SH.Widgets:Button(page, "Revert", 90, 30, function() if M:CanEdit() then UI:LoadDraft() end end, "secondary")
     self.revert:SetPoint("LEFT", self.save, "RIGHT", 8, 0)
+    self.organize = SH.Widgets:Button(page, "Organize Groups", 148, 30, function()
+        local ok, reason = M:OrganizeGroups(UI.draft)
+        if not ok then UI.message = reason end
+        UI:Refresh()
+    end, "secondary")
+    self.organize:SetPoint("LEFT", self.revert, "RIGHT", 8, 0)
+    self.organize.tooltip = "Raid leader or assistant only, before combat. Organizes groups 1-4 from the assignments currently shown, including unsaved changes. Groups 1/3 are left and 2/4 are right. Each circle's tooltip shows its group. Absent players are skipped. Full groups may swap an unassigned player out to make room."
     self.publish = SH.Widgets:Button(page, "Publish Positions", 156, 30, function()
         local ok, reason = M:Publish(UI.draft)
         UI.message = ok and "Publishing positions to the raid..." or reason
@@ -330,6 +338,9 @@ function UI:Refresh()
     enable(self.profileControls[2], editable and #M.db.profiles < 10)
     for _, button in ipairs({self.move, self.save, self.revert}) do enable(button, editable and self.draft ~= nil) end
     enable(self.publish, editable and self.draft ~= nil and IsInRaid() and UnitIsGroupLeader("player") and not M.publishing)
+    local canOrganize = M:CanOrganizeGroups()
+    self.organize:SetShown(canOrganize)
+    enable(self.organize, canOrganize and editable and self.draft ~= nil and not M.organizing)
     self.move.text:SetText(self.moving and "Lock Circles" or "Move Circles")
     self.hint:SetText(self.moving and "Drag circles to adjust their floor positions." or "Click a circle to assign a player.")
     local layout = SH.Store:GetLayout()

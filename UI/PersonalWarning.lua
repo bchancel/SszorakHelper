@@ -67,6 +67,10 @@ function SH.PersonalWarning:RefreshVisibility()
 end
 
 function SH.PersonalWarning:Show(format, ...)
+    self:ShowForDuration(SH.Store:GetPersonalWarningDelay(), format, ...)
+end
+
+function SH.PersonalWarning:ShowForDuration(duration, format, ...)
     if self.previewing then return end
     self:Hide()
     self:ApplyFontSize()
@@ -74,5 +78,5 @@ function SH.PersonalWarning:Show(format, ...)
     -- Never measure this text or send it through Blizzard's raid-warning frame.
     self.frame.text:SetFormattedText(format, ...)
     self.frame:Show()
-    self.timer = C_Timer.NewTimer(SH.Store:GetPersonalWarningDelay(), function() SH.PersonalWarning:Hide() end)
+    self.timer = C_Timer.NewTimer(duration, function() SH.PersonalWarning:Hide() end)
 end

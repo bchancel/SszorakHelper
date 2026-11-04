@@ -15,6 +15,7 @@ SH.modules.Encounter = SH.Encounter
 
 local SURGE_SPELL_ID = 1305959
 local HOWLING_SPELL_ID = 1285732
+local MYTHIC_WIND_WARNING_LEAD = 2
 local INITIAL_SURGE_DURATIONS = {[29] = true, [32] = true, [36] = true}
 local VARIABLE_EVENT_DURATIONS = {[47] = true, [52] = true, [59] = true}
 
@@ -317,15 +318,18 @@ function SH.Encounter:WarnPush(index, isTest)
     local options = SH.Store:Options()
     local showWarning = options.raidWarningPushes or isTest
     if not showWarning and not options.ttsWarnings then return end
+    -- Keep the warning visible through the same point after the wind begins.
+    local duration = SH.Store:GetPersonalWarningDelay()
+    if self.difficultyID == 16 and not isTest then duration = duration + MYTHIC_WIND_WARNING_LEAD end
     local drops = self:ComputeDropOrder()
     local markerID = drops and drops[index]
     if not markerID then
         if showWarning and (SH.Comms.receivedCount or 0) >= index then
-            SH.PersonalWarning:Show("Push toward |TInterface\\TargetingFrame\\UI-RaidTargetingIcon_%s:0|t", SH.Comms.receivedMarkers[index])
+            SH.PersonalWarning:ShowForDuration(duration, "Push toward |TInterface\\TargetingFrame\\UI-RaidTargetingIcon_%s:0|t", SH.Comms.receivedMarkers[index])
         end
         return
     end
-    if showWarning then self:SendWarning("Push toward " .. SH.Const:MarkerToken(markerID), isTest) end
+    if showWarning then SH.PersonalWarning:ShowForDuration(duration, "%s", "Push toward " .. SH.Const:MarkerToken(markerID)) end
     self:SpeakWarning("Push toward " .. SH.Const:MarkerName(markerID))
 end
 
@@ -340,7 +344,8 @@ function SH.Encounter:ScheduleEvent(event)
         end)
     end
     if event.kind == "surge" then delay = delay - 3
-    elseif event.kind == "fury" then delay = delay - 5 end
+    elseif event.kind == "fury" then delay = delay - 5
+    elseif event.kind == "wind" and self.difficultyID == 16 then delay = delay - MYTHIC_WIND_WARNING_LEAD end
     self.timers["schedule:" .. event.id] = C_Timer.NewTimer(math.max(0, delay), function()
         if not SH.Encounter.active then return end
         if event.kind == "surge" then SH.Encounter:WarnSurge(event.index, false)

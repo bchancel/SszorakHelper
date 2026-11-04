@@ -207,15 +207,18 @@ function UI:Ensure()
     self.scaleControls = {}
     local frameSection = makeSection(content, "Frame Options", -6, 174)
     local preview = addToggle(frameSection, "Preview Frames", CELL_LEFT, -34,
-        function() return options.previewFrames end, function(v) options.previewFrames = v and not options.lockFrames end)
-    toggleTooltip(preview, "Preview Frames", "See all Sszorak Helper Frames (Turn off when done)")
+        function() return options.previewFrames end, function(v)
+            options.previewFrames = v
+            if v then options.lockFrames = false end
+        end)
+    toggleTooltip(preview, "Preview Frames", "See all Sszorak Helper Frames. Enabling preview unlocks frames. Turn off when done.")
     self.previewCell = preview
     local lock = addToggle(frameSection, "Lock Frames", CELL_RIGHT, -34,
         function() return options.lockFrames end, function(v)
             options.lockFrames = v
             if v then options.previewFrames = false end
         end)
-    toggleTooltip(lock, "Lock Frames", "Disable to move around in preview mode")
+    toggleTooltip(lock, "Lock Frames", "Lock frames in place and turn off preview mode.")
     self.lockFramesToggle = lock.check
     local roomMapCell = addToggle(frameSection, "Room Mini Map", CELL_LEFT, -68, function() return options.showRoomMap end, function(v) options.showRoomMap = v end)
     self.roomMapGearButton = addGear(roomMapCell, function() UI:ShowRoomMapDialog() end,
@@ -289,7 +292,7 @@ function UI:Ensure()
     toggleTooltip(oppositeMacros, "Opposite macros",
         "On: Send the opposite marker in the current layout.\nExample: Circle sends Square in Default.\n\nOff: Reset macros so each icon sends itself.\nChanges repair the eight NSRT macros. Out of combat only.")
     self.oppositeMacrosToggle = oppositeMacros.check
-    local buttonsOnMap = addToggle(macros, "Buttons on Map", CELL_LEFT, -136,
+    local buttonsOnMap = addToggle(macros, "Buttons on Map (Experimental)", CELL_LEFT, -136,
         function() return options.nsrtButtonsOnMap end, function(value)
             options.nsrtButtonsOnMap = value
             if value then options.showRoomMap = true end
@@ -297,7 +300,7 @@ function UI:Ensure()
             SH.NSRTMacros:RefreshVisibility()
             UI:Refresh()
         end)
-    toggleTooltip(buttonsOnMap, "Buttons on Map",
+    toggleTooltip(buttonsOnMap, "Buttons on Map (Experimental)",
         "Click the room map markers to run the NSRT macros instead of using a separate panel.\nUses the same macros, Opposite macros setting, and keybinds.\nAttach to Map is disabled while active. Enable Show Entrance / Exit to make those markers clickable too.\nChanges during combat apply after combat ends; show the buttons before pulling.")
     self.buttonsOnMapToggle = buttonsOnMap.check
     self.macroOptionCells = {entranceExit, attach, autoShow, rowsCell, oppositeMacros, buttonsOnMap}
@@ -709,9 +712,8 @@ function UI:RefreshDependentControls()
     local options = SH.Store:Options()
     if self.previewCell then
         self.previewCell.check:SetChecked(options.previewFrames)
-        self.previewCell.check:SetEnabled(not options.lockFrames)
-        self.previewCell:SetAlpha(options.lockFrames and 0.4 or 1)
     end
+    if self.lockFramesToggle then self.lockFramesToggle:SetChecked(options.lockFrames) end
     local enabled = options.showNSRTMacros
     for _, cell in ipairs(self.macroOptionCells or {}) do
         local editable = enabled and (cell ~= self.attachToMapCell or not options.nsrtButtonsOnMap)
@@ -923,7 +925,7 @@ function UI:EnsureTimingDialog()
     SH.Widgets:ApplyBackdrop(panel, SH.Widgets.colors.canvasAlt, SH.Widgets.colors.borderStrong)
     panel.title = SH.Widgets:Text(panel, "Encounter timings", true)
     panel.title:SetPoint("TOPLEFT", 20, -18)
-    local hint = SH.Widgets:Label(panel, "Event times from the pull. Enter minutes:seconds or seconds. Surge warns 3 seconds before cast; Fury counts down the last 5 seconds to stack. Save applies next pull.")
+    local hint = SH.Widgets:Label(panel, "Event times from the pull. Enter minutes:seconds or seconds. Surge warns 3 seconds early; Mythic winds warn 2 seconds early; Fury counts down the last 5 seconds. Save applies next pull.")
     hint:SetPoint("TOPLEFT", 20, -50)
     hint:SetWidth(620)
     hint:SetWordWrap(true)

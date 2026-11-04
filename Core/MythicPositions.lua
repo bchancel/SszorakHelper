@@ -37,6 +37,9 @@ local displayNumbers = {
     [1] = 1, [3] = 3, [4] = 4, [5] = 5, [7] = 7, [8] = 8, [10] = 10,
     [11] = 11, [13] = 13, [15] = 12, [17] = 6, [18] = 2, [19] = 9, [20] = 14,
 }
+-- Fixed position-to-group assignments from the raid's saved formation.
+-- Groups 1/3 are left and 2/4 are right; dragging a circle keeps its group.
+local positionGroups = {3, 1, 3, 4, 3, 2, 1, 4, 3, 4, 1, 4, 2, 3, 4, 2, 2, 2, 1, 1}
 local classes = {}
 for class in ("WARRIOR PALADIN HUNTER ROGUE PRIEST DEATHKNIGHT SHAMAN MAGE WARLOCK MONK DRUID DEMONHUNTER EVOKER"):gmatch("%S+") do classes[class] = true end
 
@@ -80,6 +83,7 @@ end
 
 function M:Role(slot) return healers[slot] and "HEALER" or tanks[slot] and "TANK" or "DAMAGER" end
 function M:DisplayNumber(slot) return displayNumbers[slot] end
+function M:GroupForSlot(slot) return positionGroups[slot] end
 function M:PositionLabel(slot)
     if slot == self.BAIT_SLOT then return tostring(self:DisplayNumber(slot)) .. " - Fury Bait" end
     local number = self:DisplayNumber(slot)
@@ -153,6 +157,7 @@ function M:OnInitialize()
     self.roster, self.rosterByName = {}, {}
     if self:CanEdit() then self.playerName = fullName("player") end
     SH:RegisterEvent("PLAYER_REGEN_DISABLED", function()
+        self:FinishGroupOrganization("Group organization stopped by combat. Some players may already have moved.")
         self:CancelPublish()
         self.pending = nil
         if SH.MythicPositionsUI then SH.MythicPositionsUI:LockForCombat() end
@@ -163,14 +168,26 @@ function M:OnInitialize()
         if SH.MythicPositionsUI then SH.MythicPositionsUI:Refresh() end
     end)
     SH:RegisterEvent("GROUP_LEFT", function() self:ClearRaidPlan() end)
-    SH:RegisterEvent("PARTY_LEADER_CHANGED", function() self.pending = nil; self:CancelPublish() end)
+    SH:RegisterEvent("PARTY_LEADER_CHANGED", function()
+        self:FinishGroupOrganization("Group organization stopped by a leader change. Some players may already have moved.")
+        self.pending = nil
+        self:CancelPublish()
+    end)
+    SH:RegisterEvent("GROUP_ROSTER_UPDATE", function()
+        -- No roster enumeration unless the user has started organizing groups.
+        if self.organizing then self:UpdateGroupOrganization() end
+        if SH.MythicPositionsUI and SH.MythicPositionsUI.page and SH.MythicPositionsUI.page:IsShown() then
+            SH.MythicPositionsUI:Refresh()
+        end
+    end)
     SH:RegisterEvent("PLAYER_ENTERING_WORLD", function()
         if not IsInRaid() then self:ClearRaidPlan() end
         if self:CanEdit() then self.playerName = fullName("player"); self:RefreshPersonal() end
     end)
 end
 
--- The only raid roster enumeration in this feature. Called when its tab opens.
+-- Editor snapshots are refreshed only when the tab opens. Group organization
+-- reads its own live snapshot while the requested moves are in progress.
 function M:ScanRoster()
     if not self:CanEdit() then return false, "Open Mythic Positions outside combat and chat lockdown." end
     self.roster, self.rosterByName = {}, {}
@@ -303,11 +320,138 @@ function M:RefreshPersonal()
     if SH.RoomMap and SH.RoomMap.RefreshMythicPosition then SH.RoomMap:RefreshMythicPosition() end
 end
 function M:ClearRaidPlan()
+    self:FinishGroupOrganization("Group organization stopped because you left the raid.")
     self.received, self.pending = nil, nil
     self:CancelPublish()
     -- Do not carry a raid leader's dot into the next group or a new combat.
     self.personal = nil
     if SH.RoomMap and SH.RoomMap.RefreshMythicPosition then SH.RoomMap:RefreshMythicPosition() end
+end
+
+function M:CanOrganizeGroups()
+    return IsInRaid() and (UnitIsGroupLeader("player")
+        or type(UnitIsGroupAssistant) == "function" and UnitIsGroupAssistant("player"))
+end
+
+local function groupRoster()
+    local roster = {byName = {}, groups = {0, 0, 0, 0, 0, 0, 0, 0}}
+    local count = GetNumGroupMembers()
+    if secret(count) or type(count) ~= "number" or count < 1 or count > 40 then return nil end
+    for i = 1, count do
+        local name = fullName("raid" .. i)
+        local _, _, group = GetRaidRosterInfo(i)
+        if not name or secret(group) or type(group) ~= "number" or group % 1 ~= 0 or group < 1 or group > 8 then return nil end
+        local key = identity(name)
+        if roster.byName[key] then return nil end
+        local member = {index = i, key = key, group = group}
+        roster[#roster + 1], roster.byName[key] = member, member
+        roster.groups[group] = roster.groups[group] + 1
+        if roster.groups[group] > 5 then return nil end
+    end
+    return roster
+end
+
+function M:FinishGroupOrganization(message)
+    if not self.organizing then return end
+    if self.groupTimer then self.groupTimer:Cancel(); self.groupTimer = nil end
+    self.organizing = nil
+    if SH.MythicPositionsUI then
+        SH.MythicPositionsUI.message = message
+        SH.MythicPositionsUI:Refresh()
+    end
+end
+
+function M:OrganizeGroups(draft)
+    if not self:CanOrganizeGroups() then return false, "Only raid leaders and assistants can organize groups." end
+    if not self:CanEdit() then return false, "Organize groups outside combat and chat lockdown." end
+    if self.organizing then return false, "Group organization is already in progress." end
+    local slots = draft and self:Validate(draft.slots)
+    if not slots then return false, "Assign positions before organizing groups." end
+    if type(GetRaidRosterInfo) ~= "function" or type(SetRaidSubgroup) ~= "function" or type(SwapRaidSubgroup) ~= "function" then
+        return false, "Raid group controls are unavailable."
+    end
+    local roster = groupRoster()
+    if not roster then return false, "The raid roster is not ready. Try again in a moment." end
+    local run = {targets = {}, order = {}, members = roster.byName, size = #roster, changes = 0, absent = 0}
+    for slot, point in ipairs(slots) do
+        if point.member then
+            local key = identity(point.member.name)
+            if roster.byName[key] then
+                run.targets[key] = self:GroupForSlot(slot)
+                run.order[#run.order + 1] = key
+            else
+                run.absent = run.absent + 1
+            end
+        end
+    end
+    if #run.order == 0 then return false, "No assigned players are currently in the raid." end
+    self.organizing = run
+    if SH.MythicPositionsUI then SH.MythicPositionsUI.message = "Organizing raid groups from the displayed assignments..." end
+    self:UpdateGroupOrganization(roster)
+    return true
+end
+
+function M:UpdateGroupOrganization(roster)
+    local run = self.organizing
+    if not run then return end
+    if not self:CanEdit() or not self:CanOrganizeGroups() then
+        self:FinishGroupOrganization("Group organization stopped: combat, lockdown, or raid permissions changed. Some players may already have moved.")
+        return
+    end
+    roster = roster or groupRoster()
+    if not roster or #roster ~= run.size then
+        self:FinishGroupOrganization("Group organization stopped because the raid roster changed. Try again.")
+        return
+    end
+    for key in pairs(run.members) do
+        if not roster.byName[key] then
+            self:FinishGroupOrganization("Group organization stopped because the raid roster changed. Try again.")
+            return
+        end
+    end
+    -- Raid indexes may change after every move. Wait for confirmation, then
+    -- choose the next operation using current indexes and full Name-Realm keys.
+    if run.pending then
+        for key, group in pairs(run.pending) do
+            if roster.byName[key].group ~= group then return end
+        end
+        self.groupTimer:Cancel()
+        self.groupTimer, run.pending = nil, nil
+    end
+    for _, key in ipairs(run.order) do
+        local member, target = roster.byName[key], run.targets[key]
+        if member.group ~= target then
+            if run.changes >= 40 then
+                self:FinishGroupOrganization("Group organization stopped after repeated group changes. Try again.")
+                return
+            end
+            local partner
+            if roster.groups[target] >= 5 then
+                for _, candidate in ipairs(roster) do
+                    if candidate.group == target and run.targets[candidate.key] ~= target then
+                        partner = partner or candidate
+                        if run.targets[candidate.key] == member.group then partner = candidate; break end
+                    end
+                end
+                if not partner then self:FinishGroupOrganization("The destination group is full. Check the position assignments."); return end
+            end
+            run.pending, run.changes = {[key] = target}, run.changes + 1
+            if partner then run.pending[partner.key] = member.group end
+            self.groupTimer = C_Timer.NewTimer(3, function()
+                if M.organizing == run then
+                    M:FinishGroupOrganization("Raid group change was not confirmed. Some players may already have moved; try again.")
+                end
+            end)
+            local ok
+            if partner then ok = pcall(SwapRaidSubgroup, member.index, partner.index)
+            else ok = pcall(SetRaidSubgroup, member.index, target) end
+            if not ok then self:FinishGroupOrganization("Could not change raid groups. Some players may already have moved; try again.") end
+            return
+        end
+    end
+    local message = "Raid groups organized: " .. #run.order .. " assigned players in their position groups."
+    if run.absent > 0 then message = message .. " Skipped " .. run.absent .. " absent players." end
+    self:FinishGroupOrganization(message)
 end
 
 function M:CancelPublish()
