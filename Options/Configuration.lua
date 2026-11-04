@@ -645,7 +645,7 @@ function UI:ShowRoomMapDialog()
             function() return options.roomMapShowAssignmentLabel end, function(value) options.roomMapShowAssignmentLabel = value end)
         local boss = addToggle(panel, "Show boss landmark", 18, -258,
             function() return options.roomMapShowBoss end, function(value) options.roomMapShowBoss = value end)
-        toggleTooltip(boss, "Boss landmark", "Show a boss portrait with Mythic spread positions. The portrait and your point rotate together; the room and floor markers stay fixed.")
+        toggleTooltip(boss, "Boss landmark", "Show a boss portrait with Mythic spread positions. The portrait and your point switch room ends together; your left/right side and the floor markers stay fixed.")
         local winds = addToggle(panel, "Show wind order buttons", 18, -296,
             function() return options.showWindOrderButtons ~= false end, function(value) options.showWindOrderButtons = value end)
         toggleTooltip(winds, "Wind order buttons", "Show the 1, 2, 3 selection buttons below each side marker. Turning them off keeps the markers and current wind assignments visible.")

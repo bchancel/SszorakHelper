@@ -1,3 +1,7 @@
+## 12.1.9
+
+- Keep Mythic spread markers on the same left/right side of the room when switching between Entrance and Exit. Lower-left assignments now become upper-left instead of upper-right.
+
 ## 12.1.8
 
 - Add Buttons on Map to send NSRT macros by clicking room-map markers, using the same keybinds and Opposite macros setting as the separate panel.

@@ -37,12 +37,16 @@ local markers, floor = {}, map.frame.floor.point
 for i, group in ipairs(map.frame.groups) do markers[i] = group.point end
 E:SetFuryIndex(2)
 local exit = map.frame.mythicDot.point
-check(near(exit[4], -entrance[4]) and near(exit[5] + 5, -(entrance[5] + 5)), "exit did not rotate both axes 180 degrees")
-check(near(map.frame.boss.point[5] + 5, -(boss[5] + 5)) and map.frame.spreadSide:GetText() == "SPREAD: EXIT", "boss or side label did not follow rotation")
-check(point.x == 0.4169 and point.y == 0.7752 and floor == map.frame.floor.point, "rotation changed saved point or room texture")
+check(entrance[4] < 0 and exit[4] < 0 and near(exit[4], entrance[4]), "left-side assignment crossed to the right at Exit")
+check(entrance[5] + 5 < 0 and exit[5] + 5 > 0 and near(exit[5] + 5, -(entrance[5] + 5)), "assignment did not mirror from lower left to upper left")
+local rightX, rightY = map:GetSpreadPoint({x = 0.72, y = 0.8})
+check(near(rightX, 0.72) and near(rightY, 0.2), "right-side assignment did not stay on the right at Exit")
+check(near(map.frame.boss.point[5] + 5, -(boss[5] + 5)) and map.frame.spreadSide:GetText() == "SPREAD: EXIT", "boss or side label did not follow the room-end change")
+check(point.x == 0.4169 and point.y == 0.7752 and floor == map.frame.floor.point, "mirroring changed saved point or room texture")
 for i, group in ipairs(map.frame.groups) do check(group.point == markers[i], "a floor marker moved with the spread side") end
 E:SetFuryIndex(3)
 check(map:GetSpreadSide() == "entrance", "third Fury did not return to entrance")
+check(near(map.frame.mythicDot.point[4], entrance[4]) and near(map.frame.mythicDot.point[5], entrance[5]), "returning to Entrance changed the original assignment")
 for index, side in ipairs({"entrance", "exit", "entrance", "exit", "entrance", "exit"}) do
     E:SetFuryIndex(index)
     check(map:GetSpreadSide() == side, "second Fury of a later phase did not flip to Exit")

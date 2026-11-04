@@ -165,7 +165,8 @@ function SH.RoomMap:GetSpreadSide()
 end
 
 function SH.RoomMap:GetSpreadPoint(point)
-    if self:GetSpreadSide() == "exit" then return 1 - point.x, 1 - point.y end
+    -- Swap room ends without swapping the player's left/right lane.
+    if self:GetSpreadSide() == "exit" then return point.x, 1 - point.y end
     return point.x, point.y
 end
 
