@@ -81,14 +81,20 @@ check(UI.picker:IsShown(), "position did not open picker")
 for _, p in ipairs(M:Candidates(UI.draft, 13)) do
     check(p.role == "DAMAGER" and p.name ~= "Caller-Realm" and p.name ~= "Coollock-OtherRealm", "picker included wrong role or assigned player")
 end
-check(not M:Assign(UI.draft, 13, "Healy-Realm"), "healer assigned to damage soak")
 check(not M:Assign(UI.draft, 13, "Caller-Realm"), "duplicate assignment accepted")
 check(M:Assign(UI.draft, 2, nil), "empty tank could not clear")
-check(#M:Candidates(UI.draft, 2) == 0, "assigned tank offered twice")
+for _, member in ipairs(M:Candidates(UI.draft, 2)) do
+    check(member.name ~= "Tanky-Realm", "assigned tank offered twice")
+end
 check(M:Assign(UI.draft, 6, nil) and M:Assign(UI.draft, 2, "Tanky-Realm"), "tank assignment failed")
 check(M:Assign(UI.draft, 12, nil), "healer clear failed")
-check(#M:Candidates(UI.draft, 12) == 1 and M:Candidates(UI.draft, 12)[1].role == "HEALER", "healer filter failed")
-check(M:Assign(UI.draft, 12, "Healy-Realm"), "healer assignment failed")
+local candidates = M:Candidates(UI.draft, 12)
+check(#candidates > 1 and candidates[1].role == "HEALER" and candidates[2].role == "DAMAGER", "matching role was not listed first")
+check(M:Assign(UI.draft, 13, "Healy-Realm"), "off-role manual assignment failed")
+check(M:Assign(UI.draft, 12, "Coollock-Sargeras"), "DPS could not take a healer slot")
+check(M:Save(UI.draft) and profile.slots[13].member.name == "Healy-Realm", "off-role assignment was not saved")
+check(M:Assign(UI.draft, 13, nil) and M:Assign(UI.draft, 12, nil), "could not clear off-role assignments")
+check(M:Assign(UI.draft, 12, "Healy-Realm") and M:Assign(UI.draft, 13, "Coollock-Sargeras"), "could not restore assignments")
 check(scans == 1, "picker rescanned the raid")
 
 UI.move.scripts.OnClick(UI.move)
@@ -110,8 +116,10 @@ roster[2] = {"Different", "Sargeras", "WARLOCK", "DAMAGER"}
 SH.OptionsUI:SelectPage("configuration")
 SH.OptionsUI:SelectPage("mythic")
 check(scans == 2, "reopening did not refresh snapshot")
-check(not UI.draft.slots[13].member and UI.draft.previous[13] == "Coollock-Sargeras", "absent slot was not empty with saved hint")
-check(profile.slots[13].member.name == "Coollock-Sargeras", "opening erased saved assignment")
+local grey = UI.buttons[13].fill.vertexColor
+check(UI.draft.slots[13].member.name == "Coollock-Sargeras" and UI.buttons[13].label:GetText() == "Cool"
+    and grey[1] == grey[2] and grey[2] == grey[3], "absent player did not show a grey named circle")
+check(M:Save(UI.draft) and profile.slots[13].member.name == "Coollock-Sargeras", "saving erased absent assignment")
 check(UI.draft.slots[20].member.name == "Coollock-OtherRealm", "cross-realm identity mixed")
 check(M:Assign(UI.draft, 13, "Newlock-Sargeras"), "replacement failed")
 check(M:Save(UI.draft), "replacement not saved")

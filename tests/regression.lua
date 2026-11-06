@@ -101,6 +101,7 @@ function frameMethods:SetShown(value) protected(self); self.shown = value and tr
 function frameMethods:IsShown() return self.shown end
 function frameMethods:SetText(value) self.textValue = value end
 function frameMethods:GetText() return self.textValue end
+function frameMethods:SetVertexColor(...) self.vertexColor = {...} end
 function frameMethods:GetParent() return self.parent end
 function frameMethods:GetFrameLevel() return rawget(self, "level") or 1 end
 function frameMethods:SetFrameLevel(value) self.level = value end
@@ -1337,7 +1338,7 @@ assert(loadfile("tests/mythic_groups.lua"))(SH, {
     setCombat = function(value) combat = value end,
     setLockdown = function(value) lockdown = value end,
     setRaid = function(value) inRaid = value end,
-    fire = function(event) for _, callback in ipairs(handlers[event] or {}) do callback() end end,
+    fire = function(event, ...) for _, callback in ipairs(handlers[event] or {}) do callback(event, ...) end end,
     secret = secret,
 })
 assert(loadfile("tests/mythic_transfer.lua"))()

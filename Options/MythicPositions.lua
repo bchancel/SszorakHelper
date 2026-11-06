@@ -6,8 +6,12 @@ SH.MythicPositionsUI = UI
 local WIDTH, HEIGHT = 500, 500 * 1380 / 1456
 local CIRCLE = "Interface\\CHARACTERFRAME\\TempPortraitAlphaMask"
 local roles = {DAMAGER = "Damage soak", TANK = "Tank soak", HEALER = "Healer - does not soak"}
+local roleNames = {DAMAGER = "DPS", TANK = "Tank", HEALER = "Healer"}
 local function positionRole(slot)
     return slot == M.BAIT_SLOT and "Serpent's Fury bait" or roles[M:Role(slot)]
+end
+local function autoAssigning()
+    return M.autoAssign or (M.organizing and M.organizing.onSuccess)
 end
 
 local function text(parent, value, x, y)
@@ -111,7 +115,7 @@ function UI:Create(options)
     exit:SetPoint("TOP", 0, -7)
     local entrance = SH.Widgets:Label(room, "ENTRANCE")
     entrance:SetPoint("BOTTOM", 0, 1)
-    text(board, "Healers: positioning only. Shield: tank soak. Class color: assigned player.", 10, -512)
+    text(board, "Healers: positioning only. Shield: tank soak. Grey: absent from raid.", 10, -512)
 
     local boss = room:CreateTexture(nil, "ARTWORK")
     boss:SetSize(30, 30)
@@ -146,16 +150,17 @@ function UI:Create(options)
         button.role:SetPoint("BOTTOMRIGHT", 4, -3)
         button:SetScript("OnClick", function()
             if UI.dragged == slot then UI.dragged = nil; return end
-            if not M:CanEdit() or not UI.draft then return end
+            if not M:CanEdit() or autoAssigning() or not UI.draft then return end
             UI.selected = slot
             if not UI.moving then UI.picker:Show() end
             UI:Refresh()
         end)
         button:SetScript("OnEnter", function(owner)
             local member = UI.draft and UI.draft.slots[slot].member
-            local message = positionRole(slot) .. (slot == M.BAIT_SLOT and " (next cast)" or "") .. "\n" .. (member and member.name or "Unassigned")
+            local name = member and member.name or "Unassigned"
+            if M:IsAbsent(member) then name = name .. " (absent)" end
+            local message = positionRole(slot) .. (slot == M.BAIT_SLOT and " (next cast)" or "") .. "\n" .. name
             message = message .. "\nRaid group " .. M:GroupForSlot(slot)
-            if UI.draft and UI.draft.previous[slot] and not member then message = message .. "\nPreviously: " .. UI.draft.previous[slot] end
             SH.Widgets:ShowTooltip(owner, message, M:PositionLabel(slot))
         end)
         button:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -222,6 +227,17 @@ function UI:Create(options)
     end, "secondary")
     self.organize:SetPoint("LEFT", self.revert, "RIGHT", 8, 0)
     self.organize.tooltip = "Raid leader or assistant only, before combat. Organizes groups 1-4 from the assignments currently shown, including unsaved changes. Groups 1/3 are left and 2/4 are right. Each circle's tooltip shows its group. Absent players are skipped. Full groups may swap an unassigned player out to make room."
+    self.auto = SH.Widgets:Button(page, "Auto Assign", 112, 30, function()
+        UI:StopDrag()
+        UI.moving = false
+        UI.picker:Hide()
+        UI.profileMenu:Hide()
+        local ok, reason = M:AutoAssign(UI.draft)
+        if not ok then UI.message = reason end
+        UI:Refresh()
+    end, "secondary")
+    self.auto:SetPoint("LEFT", self.organize, "RIGHT", 8, 0)
+    self.auto.tooltip = "Raid leader or assistant only, before combat. Balances groups 1-4 and replaces displayed assignments using the current roster. Position changes are ready to review and save after the moves are confirmed."
     self.publish = SH.Widgets:Button(page, "Publish Positions", 156, 30, function()
         local ok, reason = M:Publish(UI.draft)
         UI.message = ok and "Publishing positions to the raid..." or reason
@@ -261,11 +277,12 @@ function UI:CreatePicker()
         if M:Assign(UI.draft, UI.selected, nil) then UI.dirty = true; UI:Refresh() end
     end, "secondary")
     self.clear:SetPoint("BOTTOMLEFT", 10, 10)
-    self.noCandidates = text(content, "No unassigned players for this role.", 0, 0)
+    self.noCandidates = text(content, "No unassigned raid members.", 0, 0)
     self.noCandidates:SetWidth(205)
 end
 
 function UI:Open()
+    if autoAssigning() then self:Refresh(); return end
     local draft, reason = M:OpenDraft()
     if not draft then self.message = reason; self:Refresh(); return end
     self.draft, self.dirty, self.selected, self.moving, self.message = draft, false, nil, false, nil
@@ -310,6 +327,7 @@ function UI:LockForCombat()
 end
 function UI:Received()
     if self.page and self.page:IsShown() then
+        if autoAssigning() then return end
         if self.dirty then
             self.message = "Raid positions received; your unsaved edits are kept. Revert to view the raid plan."
         else
@@ -325,7 +343,8 @@ function UI:PublicationFinished(ok, reason)
 end
 function UI:Refresh()
     if not self.page then return end
-    local editable = M:CanEdit()
+    local canEdit = M:CanEdit()
+    local editable = canEdit and not autoAssigning()
     local profile = M:GetProfile()
     self.selector.text:SetText(profile.name)
     for i, button in ipairs(self.profileButtons) do
@@ -339,8 +358,10 @@ function UI:Refresh()
     for _, button in ipairs({self.move, self.save, self.revert}) do enable(button, editable and self.draft ~= nil) end
     enable(self.publish, editable and self.draft ~= nil and IsInRaid() and UnitIsGroupLeader("player") and not M.publishing)
     local canOrganize = M:CanOrganizeGroups()
-    self.organize:SetShown(canOrganize)
-    enable(self.organize, canOrganize and editable and self.draft ~= nil and not M.organizing)
+    for _, button in ipairs({self.organize, self.auto}) do
+        button:SetShown(canOrganize)
+        enable(button, canOrganize and editable and self.draft ~= nil and not M.organizing)
+    end
     self.move.text:SetText(self.moving and "Lock Circles" or "Move Circles")
     self.hint:SetText(self.moving and "Drag circles to adjust their floor positions." or "Click a circle to assign a player.")
     local layout = SH.Store:GetLayout()
@@ -353,15 +374,20 @@ function UI:Refresh()
         self.preview.dot:SetPoint("CENTER", self.preview, "CENTER", (x - 0.5) * 50, (0.5 - y) * 50)
     end
     if not self.draft then self.status:SetText(self.message or "Reopen this tab outside combat."); return end
-    local count = 0
+    local count, absentCount = 0, 0
     for i, button in ipairs(self.buttons) do
         local member, role = self.draft.slots[i].member, M:Role(i)
+        local absent = M:IsAbsent(member)
         if member then count = count + 1 end
+        if absent then absentCount = absentCount + 1 end
         local color = member and RAID_CLASS_COLORS and RAID_CLASS_COLORS[member.class]
-        button.fill:SetVertexColor(color and color.r or 0.05, color and color.g or 0.1, color and color.b or 0.14, 1)
-        button.outline:SetVertexColor(unpack(self.selected == i and SH.Widgets.colors.accentBright or member and SH.Widgets.colors.textSecondary or SH.Widgets.colors.navigation))
+        if absent then button.fill:SetVertexColor(0.24, 0.24, 0.24, 1)
+        else button.fill:SetVertexColor(color and color.r or 0.05, color and color.g or 0.1, color and color.b or 0.14, 1) end
+        button.outline:SetVertexColor(unpack(self.selected == i and SH.Widgets.colors.accentBright
+            or absent and SH.Widgets.colors.borderStrong or member and SH.Widgets.colors.textSecondary or SH.Widgets.colors.navigation))
         button.label:SetText(member and abbreviation(member.name) or role == "TANK" and "" or "+")
-        button.label:SetTextColor(member and 0 or 1, member and 0 or 1, member and 0 or 1)
+        local shade = absent and 0.75 or member and 0 or 1
+        button.label:SetTextColor(shade, shade, shade)
         button.number:SetShown(M:DisplayNumber(i) ~= nil and i ~= M.BAIT_SLOT)
         button.role:SetShown(role ~= "DAMAGER")
         if role ~= "DAMAGER" then
@@ -372,16 +398,17 @@ function UI:Refresh()
         end
         self:PositionButton(i)
     end
-    self.count:SetText(count .. " / 20 assigned")
+    self.count:SetText(count .. " / 20 assigned" .. (absentCount > 0 and " (" .. absentCount .. " absent)" or ""))
     local source = M.received and ("Received from " .. M.received.sender) or ("Static position: " .. (personal and M:PositionLabel(personal.slot) or "unassigned"))
-    self.status:SetText(not editable and "Combat: editing locked. Reopen the tab after combat to refresh the raid."
+    self.status:SetText(not canEdit and "Combat: editing locked. Reopen the tab after combat to refresh the raid."
         or self.message or (self.dirty and "Unsaved changes." or (source .. " - " .. (20 - count) .. " empty")))
     if not self.selected or not self.picker:IsShown() then return end
     local number = M:DisplayNumber(self.selected)
     self.pickerTitle:SetText((number and ("Position " .. number .. " - ") or "") .. positionRole(self.selected))
     self.pickerTitle:SetWidth(205)
     local point = self.draft.slots[self.selected]
-    self.pickerPrevious:SetText(point.member and point.member.name or self.draft.previous[self.selected] and ("Absent: " .. self.draft.previous[self.selected]) or "Unassigned raid members only")
+    self.pickerPrevious:SetText(M:IsAbsent(point.member) and ("Absent: " .. point.member.name)
+        or point.member and point.member.name or "Unassigned raid members only")
     local candidates = M:Candidates(self.draft, self.selected)
     for i, member in ipairs(candidates) do
         local button = self.candidates[i]
@@ -402,7 +429,7 @@ function UI:Refresh()
         end
         button.memberName = member.name
         button.memberClass = member.class
-        button.text:SetText(member.name)
+        button.text:SetText(member.name .. " - " .. roleNames[member.role])
         local color = RAID_CLASS_COLORS and RAID_CLASS_COLORS[member.class]
         button:Show()
         enable(button, editable)

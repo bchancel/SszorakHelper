@@ -2,10 +2,12 @@ local SH, env = ...
 local M, UI = SH.MythicPositions, SH.MythicPositionsUI
 local function check(value, message) assert(value, "Mythic groups: " .. message) end
 local names = {"GetNumGroupMembers", "UnitFullName", "GetNormalizedRealmName", "GetRaidRosterInfo",
-    "UnitIsGroupLeader", "UnitIsGroupAssistant", "SetRaidSubgroup", "SwapRaidSubgroup"}
+    "UnitIsGroupLeader", "UnitIsGroupAssistant", "SetRaidSubgroup", "SwapRaidSubgroup",
+    "UnitClass", "UnitGroupRolesAssigned", "UnitGUID", "C_SpecializationInfo", "CanInspect", "NotifyInspect"}
 local originals = {}
 for _, name in ipairs(names) do originals[name] = _G[name] end
-local saved = {draft = UI.draft, message = UI.message, personal = M.personal, received = M.received, pageShown = UI.page:IsShown()}
+local saved = {draft = UI.draft, dirty = UI.dirty, message = UI.message, personal = M.personal, received = M.received,
+    pageShown = UI.page:IsShown(), roster = M.roster, byName = M.rosterByName}
 UI.page:Show()
 local roster, pending, actions, scans, leader, assistant = {}, nil, {}, 0, true, false
 local expected = {}
@@ -185,14 +187,138 @@ check(not M:OrganizeGroups(draft) and #actions == 0, "duplicate plan allowed mut
 draft = setup(20)
 roster[1].group = env.secret()
 check(not M:OrganizeGroups(draft) and #actions == 0, "unreadable subgroup allowed mutations")
+
+local inspected, delaySpec
+local function unitMember(unit) return roster[tonumber(unit:match("%d+$"))] end
+UnitClass = function(unit) return "", unitMember(unit).class end
+UnitGroupRolesAssigned = function(unit) return unitMember(unit).role end
+UnitGUID = function(unit) return unitMember(unit).name end
+CanInspect = function() return true end
+NotifyInspect = function(unit) inspected = UnitGUID(unit) end
+C_SpecializationInfo = {GetInspectSpecialization = function(unit)
+    local member = unitMember(unit)
+    if member.name == delaySpec then return 0 end
+    return member.spec or 0
+end}
+local function add(name, class, role, spec)
+    roster[#roster + 1] = {name = name, realm = "Realm", class = class, role = role, spec = spec,
+        group = math.floor(#roster / 5) + 1}
+end
+local function resetAuto()
+    setup(20)
+    roster = {}
+    local plan = {slots = M:DefaultSlots()}
+    plan.slots[6].x = 0.86
+    UI.draft, UI.dirty = plan, false
+    return plan
+end
+draft = resetAuto()
+add("TankA", "DEATHKNIGHT", "TANK")
+add("TankB", "WARRIOR", "TANK")
+for i = 1, 5 do add("Healer" .. i, "PRIEST", "HEALER") end
+add("Survival", "HUNTER", "DAMAGER", 255)
+add("Feral", "DRUID", "DAMAGER", 103)
+add("Enhancement", "SHAMAN", "DAMAGER", 263)
+add("Havoc", "DEMONHUNTER", "DAMAGER", 577)
+for _, class in ipairs({"WARRIOR", "MONK", "DEATHKNIGHT", "PALADIN"}) do add(class, class, "DAMAGER") end
+add("Balance", "DRUID", "DAMAGER", 102)
+add("Fire", "MAGE", "DAMAGER", 63)
+add("Arcane", "MAGE", "DAMAGER", 62)
+add("Marks", "HUNTER", "DAMAGER", 254)
+add("BeastMaster", "HUNTER", "DAMAGER", 253)
+local savedSlots = M:GetProfile().slots
+UI:Refresh()
+check(UI.auto:IsShown() and UI.auto:IsEnabled(), "leader Auto Assign button unavailable")
+UI.auto.scripts.OnClick(UI.auto)
+check(M.organizing and not UI.auto:IsEnabled() and not draft.slots[6].member, "Auto Assign changed the draft before group confirmation")
+finish()
+local membersByName, seen = {}, {}
+for _, member in ipairs(roster) do membersByName[member.name .. "-Realm"] = member end
+for slot, point in ipairs(draft.slots) do
+    local member = membersByName[point.member.name]
+    check(member and not seen[member] and member.group == expected[slot], "Auto Assign left a duplicate or misgrouped player")
+    seen[member] = true
+    if M:Role(slot) ~= "DAMAGER" then check(member.role == M:Role(slot), "tank or healer role mismatch") end
+    local display = M:DisplayNumber(slot)
+    if display and display <= 8 then
+        check(not ({Balance = true, Fire = true, Arcane = true, Marks = true, BeastMaster = true})[member.name],
+            "ranged player took a melee priority spot")
+    end
+end
+check(draft.slots[20].member.name == "BeastMaster-Realm" and membersByName["BeastMaster-Realm"].group == 1, "Fury bait priority or side wrong")
+check(membersByName[draft.slots[13].member.name].role == "HEALER" and expected[13] % 2 == 0, "fifth healer not in even position 13")
+check(draft.slots[6].x == 0.86 and UI.dirty and M:GetProfile().slots == savedSlots, "Auto Assign lost coordinates or saved without review")
+
+-- Four melee fit the first tier, and later bait choices are used in order.
+local baitOrder = {{"BeastMaster", "HUNTER", 253}, {"Marks", "HUNTER", 254}, {"Arcane", "MAGE", 62},
+    {"Fire", "MAGE", 63}, {"Balance", "DRUID", 102}}
+for first = 1, #baitOrder do
+    draft = resetAuto()
+    for i = first, #baitOrder do
+        local bait = baitOrder[i]
+        add(bait[1], bait[2], "DAMAGER", bait[3])
+    end
+    for i = 1, 4 do add("Rogue" .. i, "ROGUE", "DAMAGER") end
+    draft.slots[16].member = {name = "Away-Realm", class = "PRIEST"}
+    check(M:AutoAssign(draft), "sparse Auto Assign failed")
+    finish()
+    for _, slot in ipairs({1, 18, 5, 17}) do
+        check(draft.slots[slot].member.name:match("^Rogue"), "melee skipped a tier 1 spot")
+    end
+    check(draft.slots[20].member.name == baitOrder[first][1] .. "-Realm", "incorrect fallback in Fury order")
+    check(draft.slots[16].member.name == "Away-Realm", "unused absent assignment was dropped")
+end
+
+-- Inspect results must match the requested GUID, and late results after combat are ignored.
+draft = resetAuto()
+add("Marks", "HUNTER", "DAMAGER", 254)
+add("BeastMaster", "HUNTER", "DAMAGER", 253)
+delaySpec = "BeastMaster"
+check(M:AutoAssign(draft) and M.autoAssign and inspected == "BeastMaster" and #actions == 0, "inspect did not precede group moves")
+local timer = M.autoAssign.timer
+delaySpec = nil
+env.fire("INSPECT_READY", "Marks")
+check(not M.autoAssign.inspecting.spec, "wrong GUID supplied an inspected spec")
+env.fire("INSPECT_READY", "BeastMaster")
+timer.callback()
+finish()
+check(draft.slots[20].member.name == "BeastMaster-Realm", "inspected spec did not take priority")
+draft = resetAuto()
+add("Unknown", "HUNTER", "DAMAGER")
+check(M:AutoAssign(draft) and M.autoAssign, "unavailable spec did not start a bounded inspection")
+M.autoAssign.timer.callback()
+finish()
+check(draft.slots[20].member.name == "Unknown-Realm" and UI.message:find("Specs unavailable for 1", 1, true), "unknown-spec fallback was not reported")
+draft = resetAuto()
+add("Unknown", "HUNTER", "DAMAGER")
+check(M:AutoAssign(draft) and M.autoAssign, "could not start interrupted inspection")
+timer = M.autoAssign.timer
+env.setCombat(true)
+env.fire("PLAYER_REGEN_DISABLED")
+timer.callback()
+env.fire("INSPECT_READY", "Unknown")
+check(timer.cancelled and not M.autoAssign and not M.organizing and #actions == 0 and not draft.slots[20].member,
+    "combat let a late inspection apply assignments")
+env.setCombat(false)
+
+draft = resetAuto()
+add("TankA", "WARRIOR", "TANK")
+add("TankB", "PALADIN", "TANK")
+leader, assistant = false, true
+check(M:AutoAssign(draft) and M.groupTimer, "assistant could not start Auto Assign")
+M.groupTimer.callback()
+check(not M.organizing and not draft.slots[2].member and not draft.slots[6].member and not UI.dirty,
+    "unconfirmed group move committed the Auto Assign draft")
+
 draft = setup(20)
 SetRaidSubgroup, SwapRaidSubgroup = function() error("rejected") end, function() error("rejected") end
 check(M:OrganizeGroups(draft) and not M.organizing and not M.groupTimer, "API failure did not stop run")
 check(UI.message:find("Could not change", 1, true), "API failure claimed success")
 
 for _, name in ipairs(names) do _G[name] = originals[name] end
-UI.draft, UI.message, M.personal, M.received = saved.draft, saved.message, saved.personal, saved.received
+UI.draft, UI.dirty, UI.message = saved.draft, saved.dirty, saved.message
+M.personal, M.received, M.roster, M.rosterByName = saved.personal, saved.received, saved.roster, saved.byName
 UI.page:SetShown(saved.pageShown)
 env.setCombat(false); env.setLockdown(false); env.setRaid(true)
 UI:Refresh()
-print("Mythic group checks passed: exact formation, full/partial raids, live indexes, permissions, missing players and cancellation.")
+print("Mythic group checks passed: organization, auto assignment, melee tiers, Fury priorities, inspection and cancellation.")

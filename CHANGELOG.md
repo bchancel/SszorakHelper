@@ -1,3 +1,9 @@
+## 12.1.11
+
+- Show absent players in grey and keep their saved Mythic Positions.
+- Let any unassigned raider fill any position, with matching roles listed first.
+- Add Auto Assign for raid leaders and assistants to balance raid groups and fill Mythic Positions, including Fury bait.
+
 ## 12.1.10
 
 - Add Organize Groups to Mythic Positions for raid leaders and assistants. Arrange groups 1-4 from the displayed assignments, following the saved formation, with missing-player handling and swaps for full groups.

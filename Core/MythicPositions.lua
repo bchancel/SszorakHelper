@@ -156,7 +156,9 @@ function M:OnInitialize()
     self.db, SH.Store.db.mythicPositions = db, db
     self.roster, self.rosterByName = {}, {}
     if self:CanEdit() then self.playerName = fullName("player") end
+    SH:RegisterEvent("INSPECT_READY", function(_, guid) self:AutoAssignInspectReady(guid) end)
     SH:RegisterEvent("PLAYER_REGEN_DISABLED", function()
+        self:CancelAutoAssign("Auto Assign stopped by combat.")
         self:FinishGroupOrganization("Group organization stopped by combat. Some players may already have moved.")
         self:CancelPublish()
         self.pending = nil
@@ -169,12 +171,14 @@ function M:OnInitialize()
     end)
     SH:RegisterEvent("GROUP_LEFT", function() self:ClearRaidPlan() end)
     SH:RegisterEvent("PARTY_LEADER_CHANGED", function()
+        self:CancelAutoAssign("Auto Assign stopped by a leader change.")
         self:FinishGroupOrganization("Group organization stopped by a leader change. Some players may already have moved.")
         self.pending = nil
         self:CancelPublish()
     end)
     SH:RegisterEvent("GROUP_ROSTER_UPDATE", function()
-        -- No roster enumeration unless the user has started organizing groups.
+        -- Live reads are limited to an explicitly started group operation.
+        if self.autoAssign then self:UpdateAutoAssignRoster() end
         if self.organizing then self:UpdateGroupOrganization() end
         if SH.MythicPositionsUI and SH.MythicPositionsUI.page and SH.MythicPositionsUI.page:IsShown() then
             SH.MythicPositionsUI:Refresh()
@@ -186,8 +190,15 @@ function M:OnInitialize()
     end)
 end
 
--- Editor snapshots are refreshed only when the tab opens. Group organization
--- reads its own live snapshot while the requested moves are in progress.
+-- The editor takes a snapshot on open. Group operations use their own live roster.
+local function readMember(unit, name)
+    local _, class = UnitClass(unit)
+    local role = UnitGroupRolesAssigned(unit)
+    if secret(class) or secret(role) or not name or not classes[class] then return nil end
+    if role ~= "TANK" and role ~= "HEALER" and role ~= "DAMAGER" then role = "NONE" end
+    return {name = name, class = class, role = role}
+end
+
 function M:ScanRoster()
     if not self:CanEdit() then return false, "Open Mythic Positions outside combat and chat lockdown." end
     self.roster, self.rosterByName = {}, {}
@@ -195,14 +206,11 @@ function M:ScanRoster()
     if IsInRaid() then
         for i = 1, GetNumGroupMembers() do
             local unit = "raid" .. i
-            local name = fullName(unit)
-            local _, class = UnitClass(unit)
-            local role = UnitGroupRolesAssigned(unit)
-            if not secret(class) and not secret(role) and name and classes[class] then
-                if role ~= "TANK" and role ~= "HEALER" then role = "DAMAGER" end
-                local member = {name = name, class = class, role = role}
+            local member = readMember(unit, fullName(unit))
+            if member then
+                if member.role == "NONE" then member.role = "DAMAGER" end
                 self.roster[#self.roster + 1] = member
-                self.rosterByName[identity(name)] = member
+                self.rosterByName[identity(member.name)] = member
             end
         end
     end
@@ -212,34 +220,32 @@ end
 function M:OpenDraft()
     local ok, reason = self:ScanRoster()
     if not ok then return nil, reason end
-    return self:DraftFromSnapshot(true)
+    return self:DraftFromSnapshot()
 end
-function M:DraftFromSnapshot(reconcileReceived)
-    -- Received plans were already validated by the current leader. A stale or
-    -- unopened local roster snapshot must not erase their assignments.
-    if self.received and not reconcileReceived then
-        return {slots = copy(self.received.slots), previous = {}, profileID = self:GetProfile().id}
-    end
+function M:DraftFromSnapshot()
     local slots = copy(self.received and self.received.slots or self:GetProfile().slots)
-    local previous = {}
-    for i, slot in ipairs(slots) do
+    for _, slot in ipairs(slots) do
         if slot.member then
             local current = self.rosterByName[identity(slot.member.name)]
-            if not current or current.role ~= self:Role(i) then
-                previous[i], slot.member = slot.member.name, nil
-            else
-                slot.member.class = current.class
-            end
+            if current then slot.member.class = current.class end
         end
     end
-    return {slots = slots, previous = previous, profileID = self:GetProfile().id}
+    return {slots = slots, profileID = self:GetProfile().id}
+end
+function M:IsAbsent(member)
+    return member ~= nil and (not IsInRaid() or not self.rosterByName[identity(member.name)])
 end
 function M:Candidates(draft, slot)
-    local used, result = {}, {}
+    local used, result, other = {}, {}, {}
+    local role = self:Role(slot)
     for _, point in ipairs(draft.slots) do if point.member then used[identity(point.member.name)] = true end end
     for _, member in ipairs(self.roster) do
-        if member.role == self:Role(slot) and not used[identity(member.name)] then result[#result + 1] = member end
+        if not used[identity(member.name)] then
+            local list = member.role == role and result or other
+            list[#list + 1] = member
+        end
     end
+    for _, member in ipairs(other) do result[#result + 1] = member end
     return result
 end
 function M:Assign(draft, slot, name)
@@ -255,13 +261,6 @@ function M:Save(draft)
     if not self:CanEdit() then return false, "Save positions outside combat." end
     local slots = draft and self:Validate(draft.slots)
     if not slots then return false, "The position assignments are invalid." end
-    -- Validate only against the opening snapshot; saving never scans the raid.
-    for i, slot in ipairs(slots) do
-        if slot.member then
-            local member = self.rosterByName[identity(slot.member.name)]
-            if not member or member.role ~= self:Role(i) then return false, "Reopen Mythic Positions to refresh the raid." end
-        end
-    end
     self:GetProfile().slots = slots
     self.received = nil
     self:RefreshPersonal()
@@ -320,8 +319,10 @@ function M:RefreshPersonal()
     if SH.RoomMap and SH.RoomMap.RefreshMythicPosition then SH.RoomMap:RefreshMythicPosition() end
 end
 function M:ClearRaidPlan()
+    self:CancelAutoAssign("Auto Assign stopped because you left the raid.")
     self:FinishGroupOrganization("Group organization stopped because you left the raid.")
     self.received, self.pending = nil, nil
+    self.roster, self.rosterByName = {}, {}
     self:CancelPublish()
     -- Do not carry a raid leader's dot into the next group or a new combat.
     self.personal = nil
@@ -343,7 +344,7 @@ local function groupRoster()
         if not name or secret(group) or type(group) ~= "number" or group % 1 ~= 0 or group < 1 or group > 8 then return nil end
         local key = identity(name)
         if roster.byName[key] then return nil end
-        local member = {index = i, key = key, group = group}
+        local member = {index = i, key = key, name = name, group = group}
         roster[#roster + 1], roster.byName[key] = member, member
         roster.groups[group] = roster.groups[group] + 1
         if roster.groups[group] > 5 then return nil end
@@ -351,28 +352,37 @@ local function groupRoster()
     return roster
 end
 
-function M:FinishGroupOrganization(message)
-    if not self.organizing then return end
+local function sameGroupRoster(roster, snapshot)
+    if not roster or #roster ~= #snapshot then return false end
+    for key in pairs(snapshot.byName) do
+        if not roster.byName[key] then return false end
+    end
+    return true
+end
+
+function M:FinishGroupOrganization(message, success)
+    local run = self.organizing
+    if not run then return end
     if self.groupTimer then self.groupTimer:Cancel(); self.groupTimer = nil end
     self.organizing = nil
+    if success and run.onSuccess then message = run.onSuccess() end
     if SH.MythicPositionsUI then
         SH.MythicPositionsUI.message = message
         SH.MythicPositionsUI:Refresh()
     end
 end
 
-function M:OrganizeGroups(draft)
-    if not self:CanOrganizeGroups() then return false, "Only raid leaders and assistants can organize groups." end
-    if not self:CanEdit() then return false, "Organize groups outside combat and chat lockdown." end
-    if self.organizing then return false, "Group organization is already in progress." end
-    local slots = draft and self:Validate(draft.slots)
-    if not slots then return false, "Assign positions before organizing groups." end
+local function groupOrganizationError(self)
+    if not self:CanOrganizeGroups() then return "Only raid leaders and assistants can organize groups." end
+    if not self:CanEdit() then return "Organize groups outside combat and chat lockdown." end
+    if self.organizing or self.autoAssign then return "Group organization is already in progress." end
     if type(GetRaidRosterInfo) ~= "function" or type(SetRaidSubgroup) ~= "function" or type(SwapRaidSubgroup) ~= "function" then
-        return false, "Raid group controls are unavailable."
+        return "Raid group controls are unavailable."
     end
-    local roster = groupRoster()
-    if not roster then return false, "The raid roster is not ready. Try again in a moment." end
-    local run = {targets = {}, order = {}, members = roster.byName, size = #roster, changes = 0, absent = 0}
+end
+
+local function startGroupOrganization(self, slots, roster, onSuccess)
+    local run = {targets = {}, order = {}, roster = roster, changes = 0, absent = 0, onSuccess = onSuccess}
     for slot, point in ipairs(slots) do
         if point.member then
             local key = identity(point.member.name)
@@ -386,9 +396,22 @@ function M:OrganizeGroups(draft)
     end
     if #run.order == 0 then return false, "No assigned players are currently in the raid." end
     self.organizing = run
-    if SH.MythicPositionsUI then SH.MythicPositionsUI.message = "Organizing raid groups from the displayed assignments..." end
+    if SH.MythicPositionsUI then
+        SH.MythicPositionsUI.message = onSuccess and "Auto Assign is balancing raid groups..."
+            or "Organizing raid groups from the displayed assignments..."
+    end
     self:UpdateGroupOrganization(roster)
     return true
+end
+
+function M:OrganizeGroups(draft)
+    local reason = groupOrganizationError(self)
+    if reason then return false, reason end
+    local slots = draft and self:Validate(draft.slots)
+    if not slots then return false, "Assign positions before organizing groups." end
+    local roster = groupRoster()
+    if not roster then return false, "The raid roster is not ready. Try again in a moment." end
+    return startGroupOrganization(self, slots, roster)
 end
 
 function M:UpdateGroupOrganization(roster)
@@ -399,15 +422,9 @@ function M:UpdateGroupOrganization(roster)
         return
     end
     roster = roster or groupRoster()
-    if not roster or #roster ~= run.size then
+    if not sameGroupRoster(roster, run.roster) then
         self:FinishGroupOrganization("Group organization stopped because the raid roster changed. Try again.")
         return
-    end
-    for key in pairs(run.members) do
-        if not roster.byName[key] then
-            self:FinishGroupOrganization("Group organization stopped because the raid roster changed. Try again.")
-            return
-        end
     end
     -- Raid indexes may change after every move. Wait for confirmation, then
     -- choose the next operation using current indexes and full Name-Realm keys.
@@ -451,7 +468,228 @@ function M:UpdateGroupOrganization(roster)
     end
     local message = "Raid groups organized: " .. #run.order .. " assigned players in their position groups."
     if run.absent > 0 then message = message .. " Skipped " .. run.absent .. " absent players." end
-    self:FinishGroupOrganization(message)
+    self:FinishGroupOrganization(message, true)
+end
+
+local meleeClasses = {PALADIN = true, DEATHKNIGHT = true, WARRIOR = true, ROGUE = true, MONK = true}
+local meleeSpecs = {[255] = true, [103] = true, [263] = true, [577] = true} -- Survival, Feral, Enhancement, Havoc
+local prioritySpecClasses = {HUNTER = true, MAGE = true, DRUID = true, SHAMAN = true, DEMONHUNTER = true}
+local furySpecs = {[253] = 1, [254] = 2, [62] = 3, [102] = 5} -- BM, Marksmanship, Arcane, Balance
+-- Internal slot IDs ordered by the display numbers for melee tiers, then the other damage spots.
+local damageSlots = {1, 18, 5, 17, 3, 4, 7, 8, 19, 10, 11, 15, 13}
+
+local function readSpec(unit)
+    local api = C_SpecializationInfo
+    if not api then return nil end
+    local spec
+    if unit == "player" and api.GetSpecialization and api.GetSpecializationInfo then
+        local index = api.GetSpecialization()
+        if not secret(index) and type(index) == "number" and index > 0 then spec = api.GetSpecializationInfo(index) end
+    elseif api.GetInspectSpecialization then
+        spec = api.GetInspectSpecialization(unit)
+    end
+    if not secret(spec) and type(spec) == "number" and spec > 0 then return spec end
+end
+
+local function melee(member)
+    return member.role == "DAMAGER" and (meleeClasses[member.class] or meleeSpecs[member.spec])
+end
+
+local function furyRank(member)
+    return furySpecs[member.spec] or (member.class == "MAGE" and 4) or (melee(member) and 7 or 6)
+end
+
+local function buildAutoAssignments(slots, members, byName)
+    local result, used = copy(slots), {}
+    for _, point in ipairs(result) do point.member = nil end
+    local function place(slot, member)
+        if not member then return end
+        result[slot].member = {name = member.name, class = member.class}
+        used[member] = true
+    end
+    local function pick(role, slot, rank)
+        local best, score
+        for _, member in ipairs(members) do
+            if not used[member] and (not role or member.role == role) then
+                local candidateScore = (rank and rank(member) or 0) * 2
+                    + (member.group == positionGroups[slot] and 0 or 1)
+                if not score or candidateScore < score then best, score = member, candidateScore end
+            end
+        end
+        return best
+    end
+
+    for _, slot in ipairs({2, 6}) do place(slot, pick("TANK", slot)) end
+    for _, slot in ipairs({9, 12, 14, 16, 13}) do place(slot, pick("HEALER", slot)) end
+    local bait = pick("DAMAGER", M.BAIT_SLOT, furyRank)
+    place(M.BAIT_SLOT, bait)
+
+    local meleePlayers, available = {}, {}
+    for _, member in ipairs(members) do
+        if not used[member] and melee(member) then meleePlayers[#meleePlayers + 1] = member end
+    end
+    for _, slot in ipairs(damageSlots) do
+        if not result[slot].member then available[#available + 1] = slot end
+    end
+    if #meleePlayers > #available then
+        for _, slot in ipairs({2, 6, 9, 12, 14, 16}) do
+            if not result[slot].member then available[#available + 1] = slot end
+        end
+    end
+    local oddCapacity = 0
+    for _, slot in ipairs(available) do oddCapacity = oddCapacity + positionGroups[slot] % 2 end
+    local evenCapacity = #available - oddCapacity
+    local baitMelee = bait and melee(bait) and 1 or 0
+    local idealOdd = math.floor((#meleePlayers + baitMelee) / 2) - baitMelee
+    local odd = math.max(0, #meleePlayers - evenCapacity, math.min(idealOdd, oddCapacity))
+    local remaining = {[0] = #meleePlayers - odd, [1] = odd}
+    for _, slot in ipairs(available) do
+        local side = positionGroups[slot] % 2
+        if remaining[side] > 0 then
+            place(slot, table.remove(meleePlayers, 1))
+            remaining[side] = remaining[side] - 1
+        end
+    end
+
+    for _, slot in ipairs(damageSlots) do
+        if not result[slot].member then place(slot, pick("DAMAGER", slot)) end
+    end
+    for slot, point in ipairs(result) do
+        if not point.member then
+            place(slot, pick(nil, slot))
+            local previous = slots[slot].member
+            if not point.member and previous and not byName[identity(previous.name)] then point.member = previous end
+        end
+    end
+    return result
+end
+
+function M:CancelAutoAssign(message)
+    local run = self.autoAssign
+    if not run then return end
+    if run.timer then run.timer:Cancel() end
+    self.autoAssign = nil
+    if SH.MythicPositionsUI then
+        SH.MythicPositionsUI.message = message
+        SH.MythicPositionsUI:Refresh()
+    end
+end
+
+function M:AutoAssignInspectReady(guid)
+    local run = self.autoAssign
+    local member = run and run.inspecting
+    if not member or secret(guid) or guid ~= run.guid or not self:CanEdit() then return end
+    local unit = "raid" .. member.index
+    local current = UnitGUID(unit)
+    if not secret(current) and current == guid then member.spec = readSpec(unit) end
+end
+
+function M:UpdateAutoAssignRoster()
+    local run = self.autoAssign
+    if not self:CanEdit() or not self:CanOrganizeGroups() then
+        self:CancelAutoAssign("Auto Assign stopped because combat, lockdown, or raid permissions changed.")
+        return
+    end
+    local roster = groupRoster()
+    if not sameGroupRoster(roster, run.roster) then
+        self:CancelAutoAssign("Auto Assign stopped because the raid roster changed. Try again.")
+        return
+    end
+    for key, member in pairs(run.byName) do member.index = roster.byName[key].index end
+    return roster
+end
+
+function M:ContinueAutoAssign(run)
+    if self.autoAssign ~= run then return end
+    if not self:CanEdit() or not self:CanOrganizeGroups() then
+        self:CancelAutoAssign("Auto Assign stopped because combat, lockdown, or raid permissions changed.")
+        return
+    end
+    run.inspecting = nil
+    while run.next <= #run.inspect do
+        local member = run.inspect[run.next]
+        run.next = run.next + 1
+        local unit = "raid" .. member.index
+        if fullName(unit) == member.name and CanInspect(unit) and not (InspectFrame and InspectFrame:IsShown()) then
+            local guid = UnitGUID(unit)
+            if not secret(guid) and type(guid) == "string" then
+                run.inspecting, run.guid = member, guid
+                if pcall(NotifyInspect, unit) then
+                    -- Pace inspect requests and move on if this player doesn't respond.
+                    run.timer = C_Timer.NewTimer(2, function()
+                        run.timer = nil
+                        self:ContinueAutoAssign(run)
+                    end)
+                    return
+                end
+                run.inspecting = nil
+            end
+        end
+    end
+    local roster = self:UpdateAutoAssignRoster()
+    if not roster then return end
+    local unknown, tanksFound, healersFound = 0, 0, 0
+    local roleBySpec = C_SpecializationInfo and C_SpecializationInfo.GetSpecializationRoleByID or GetSpecializationRoleByID
+    for _, member in ipairs(run.members) do
+        local current = readMember("raid" .. member.index, member.name)
+        if not current or current.role ~= member.role then
+            self:CancelAutoAssign("Auto Assign stopped because raid roles changed. Try again.")
+            return
+        end
+        member.group = roster.byName[identity(member.name)].group
+        if member.role == "NONE" then
+            local role = member.spec and roleBySpec and roleBySpec(member.spec)
+            member.role = not secret(role) and (role == "TANK" or role == "HEALER") and role or "DAMAGER"
+        end
+        if member.role == "TANK" then tanksFound = tanksFound + 1 end
+        if member.role == "HEALER" then healersFound = healersFound + 1 end
+        if member.needsSpec and not member.spec then unknown = unknown + 1 end
+    end
+    local slots = buildAutoAssignments(run.slots, run.members, run.byName)
+    self.autoAssign = nil
+    startGroupOrganization(self, slots, roster, function()
+        self.roster, self.rosterByName = run.members, run.byName
+        run.draft.slots = slots
+        local ui = SH.MythicPositionsUI
+        if ui and ui.draft == run.draft then ui.dirty = true end
+        local message = "Auto Assign placed " .. #roster .. " players. Positions are unsaved."
+        if tanksFound < 2 or healersFound < 4 then message = message .. " Fewer than 2 tanks or 4 healers." end
+        if unknown > 0 then message = message .. " Specs unavailable for " .. unknown .. "." end
+        return message
+    end)
+end
+
+function M:AutoAssign(draft)
+    local reason = groupOrganizationError(self)
+    if reason then return false, reason end
+    local slots = draft and self:Validate(draft.slots)
+    if not slots then return false, "Open a position profile before using Auto Assign." end
+    local roster = groupRoster()
+    if not roster then return false, "The raid roster is not ready. Try again in a moment." end
+    if #roster > #slots then return false, "Auto Assign supports up to 20 raid members." end
+    local run = {draft = draft, slots = slots, roster = roster, members = {}, byName = {}, inspect = {}, next = 1}
+    local player = fullName("player")
+    local canInspect = type(CanInspect) == "function" and type(NotifyInspect) == "function"
+        and type(UnitGUID) == "function" and C_SpecializationInfo and C_SpecializationInfo.GetInspectSpecialization
+    for _, entry in ipairs(roster) do
+        local unit = "raid" .. entry.index
+        local member = readMember(unit, entry.name)
+        if not member then return false, "The raid roster is not ready. Try again in a moment." end
+        member.index = entry.index
+        member.needsSpec = member.role == "NONE" or (member.role == "DAMAGER" and prioritySpecClasses[member.class])
+        if member.needsSpec then
+            member.spec = readSpec(entry.name == player and "player" or unit)
+            if not member.spec and canInspect and entry.name ~= player then
+                run.inspect[#run.inspect + 1] = member
+            end
+        end
+        run.members[#run.members + 1], run.byName[entry.key] = member, member
+    end
+    table.sort(run.members, function(a, b) return identity(a.name) < identity(b.name) end)
+    self.autoAssign = run
+    if SH.MythicPositionsUI then SH.MythicPositionsUI.message = "Auto Assign is checking raid specializations..." end
+    self:ContinueAutoAssign(run)
+    return true
 end
 
 function M:CancelPublish()
