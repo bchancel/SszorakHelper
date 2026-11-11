@@ -4,13 +4,15 @@ SH.MinimapButton = {initializeOrder = 15}
 SH.modules.MinimapButton = SH.MinimapButton
 
 local ICON_TEXTURE = 7966619
-local BUTTON_RADIUS = 80
+local BUTTON_EDGE_OFFSET = 5
 
 function SH.MinimapButton:UpdatePosition()
     if not self.button or not Minimap then return end
     local angle = math.rad(tonumber(SH.Store:Options().minimapAngle) or 220)
+    local radiusX = Minimap:GetWidth() / 2 + BUTTON_EDGE_OFFSET
+    local radiusY = Minimap:GetHeight() / 2 + BUTTON_EDGE_OFFSET
     self.button:ClearAllPoints()
-    self.button:SetPoint("CENTER", Minimap, "CENTER", math.cos(angle) * BUTTON_RADIUS, math.sin(angle) * BUTTON_RADIUS)
+    self.button:SetPoint("CENTER", Minimap, "CENTER", math.cos(angle) * radiusX, math.sin(angle) * radiusY)
 end
 
 function SH.MinimapButton:UpdateDragPosition()
@@ -72,5 +74,6 @@ function SH.MinimapButton:OnInitialize()
     button:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     self.button = button
+    Minimap:HookScript("OnSizeChanged", function() self:UpdatePosition() end)
     self:UpdatePosition()
 end

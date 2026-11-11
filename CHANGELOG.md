@@ -1,3 +1,7 @@
+## 12.1.12
+
+- Keep the minimap icon aligned with the rim when the minimap is resized.
+
 ## 12.1.11
 
 - Show absent players in grey and keep their saved Mythic Positions.
